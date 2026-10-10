@@ -30,11 +30,12 @@ static void test_empty_and_out_of_range_inputs(void)
 
 static void test_detail_closes_only_on_escape(void)
 {
-    assert(!sn_ui_detail_should_dismiss('q'));
-    assert(!sn_ui_detail_should_dismiss('\n'));
-    assert(!sn_ui_detail_should_dismiss(' '));
-    assert(!sn_ui_detail_should_dismiss(-1));
-    assert(sn_ui_detail_should_dismiss(27));
+    assert(!sn_ui_detail_should_dismiss(-1, -1, -2));
+    assert(!sn_ui_detail_should_dismiss(-2, -1, -2));
+    assert(sn_ui_detail_should_dismiss(27, -1, -2));
+    assert(sn_ui_detail_should_dismiss('q', -1, -2));
+    assert(sn_ui_detail_should_dismiss('\n', -1, -2));
+    assert(sn_ui_detail_should_dismiss(' ', -1, -2));
 }
 
 int main(void)

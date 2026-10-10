@@ -273,13 +273,14 @@ static void set_port_filter(const char *prompt, bool *enabled, uint16_t *port)
 static void show_details(const struct sn_flow *flow,
                          bool payload_inspection_active,
                          sn_ui_poll_callback poll_capture,
-                         void *poll_context)
+                         void *poll_context,
+                         bool *capture_polling,
+                         const char **capture_status)
 {
     char endpoint_a[INET_ADDRSTRLEN] = "?";
     char endpoint_b[INET_ADDRSTRLEN] = "?";
     int row = 1;
     int key;
-    bool capture_polling = poll_capture != NULL;
     bool redraw = true;
 
     (void)inet_ntop(AF_INET, flow->endpoints[0].ipv4,
@@ -339,15 +340,24 @@ static void show_details(const struct sn_flow *flow,
             refresh();
         }
         key = getch();
-        if (sn_ui_detail_should_dismiss(key)) {
-            break;
+        if (key == ERR) {
+            if (*capture_polling) {
+                enum sn_ui_poll_result result = poll_capture(poll_context, capture_status);
+                if (result == SN_UI_POLL_STOPPED) {
+                    *capture_polling = false;
+                } else if (result == SN_UI_POLL_UPDATED) {
+                    redraw = true;
+                }
+            }
+            continue;
         }
         if (key == KEY_RESIZE) {
             (void)resize_term(0, 0);
             redraw = true;
+            continue;
         }
-        if (key == ERR && capture_polling && poll_capture(poll_context) != NULL) {
-            capture_polling = false;
+        if (sn_ui_detail_should_dismiss(key, ERR, KEY_RESIZE)) {
+            break;
         }
     }
 }
@@ -396,8 +406,7 @@ int sn_ui_run(struct sn_monitor *monitor,
                                        monotonic_time_ns(), &rates)) {
                 rates_ready = true;
             }
-            capture_status = poll_capture(poll_context);
-            if (capture_status != NULL) {
+            if (poll_capture(poll_context, &capture_status) == SN_UI_POLL_STOPPED) {
                 capture_polling = false;
             }
         }
@@ -448,7 +457,8 @@ int sn_ui_run(struct sn_monitor *monitor,
         case KEY_ENTER:
             if (flow_count > 0U) {
                 show_details(flows[selected], payload_inspection_active,
-                             poll_capture, poll_context);
+                             poll_capture, poll_context,
+                             &capture_polling, &capture_status);
             }
             break;
         case '1':

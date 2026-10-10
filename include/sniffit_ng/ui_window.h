@@ -9,6 +9,6 @@ size_t sn_ui_window_start(size_t item_count,
                           size_t visible_count,
                           size_t current_start);
 
-bool sn_ui_detail_should_dismiss(int key);
+bool sn_ui_detail_should_dismiss(int key, int timeout_key, int resize_key);
 
 #endif

@@ -84,7 +84,7 @@ The user has explicitly authorized development and testing of live capture again
 ## Remaining Refactor Work
 
 1. **LAN ping display:** Verified against authorized host `razorback` (`192.168.1.6`) with eight successful pings and live GUI confirmation. No broader LAN scan was performed.
-2. **Complete UI parity:** Scrolling and resize clamping are implemented with a pure helper test; Enter details persist until Escape while capture polling continues. Remaining: `-I`-style extended descriptions, deterministic flow ordering, and more detailed filter semantics. The initial list/details/mask/statistics/reset/quit workflow exists but is not full legacy parity.
+2. **Complete UI parity:** Scrolling and resize clamping are implemented with pure helper tests; Enter details remain stable while capture polling continues and close on any key. Remaining: `-I`-style extended descriptions, deterministic flow ordering, and more detailed filter semantics. The initial list/details/mask/statistics/reset/quit workflow exists but is not full legacy parity.
 3. **Configuration and compatibility:** The bounded `inspect_payloads` config and exact ethics-marker validation are implemented. Remaining: add an explicitly mapped legacy CLI/config subset; preserve only validated semantics.
 4. **Output modes:** Add safe pcap recording and selected summary/dump modes. Keep cleartext payload output disabled unless the runtime acknowledgment policy is satisfied.
 5. **Hardening:** Add parser fuzz targets, broader malformed-pcap corpus, pseudo-terminal curses interaction tests, and privilege/capability tests across supported Linux environments. Decide and document behavior for non-Ethernet link types.

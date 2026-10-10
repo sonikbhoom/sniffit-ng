@@ -4,7 +4,7 @@ Sniffit NG is a security-focused C successor to the legacy Sniffit monitor, deve
 
 This repository currently has no license. Public visibility does not itself grant permission to reuse, modify, or redistribute the code.
 
-In the live curses view, select a flow and press Enter to open its details. The detail screen remains visible while capture continues and returns to the list only when Escape is pressed.
+In the live curses view, select a flow and press Enter to open its details. The detail screen stays stable while capture continues and closes when any key is pressed.
 
 ## Build and test
 
