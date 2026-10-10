@@ -70,6 +70,7 @@ The user has explicitly authorized development and testing of live capture again
 
 ## Milestone Checkpoint: 2026-10-10
 
+- **Publication choice:** Public repository, no license file for now. Public visibility does not grant reuse rights; revisit licensing before inviting contributions or advertising reuse.
 - The isolated `sniffit-ng` project has a safe Ethernet/IPv4 parser, bounded TCP/UDP/ICMP flow state, offline and live libpcap sources, a bounded monitor event queue, an initial curses workflow, and fail-closed acknowledged payload logging.
 - The non-sanitized `cap_net_raw+p` loopback test passed after privilege drop. The user confirmed the live curses screen and three-second rate display. The sanitizer suite passes; its live test is intentionally skipped when run without `CAP_NET_RAW`.
 - Local Git milestone: commit `a592f36` on `main`. Push to `https://github.com/sonikbhoom/sniffit-ng` did not complete: GitHub returned `Repository not found`; SSH returned `Permission denied (publickey)`. The destination may be private, not created, mistyped, or inaccessible to the configured credentials. Do not claim the code is published until a push succeeds.
