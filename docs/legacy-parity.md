@@ -4,7 +4,7 @@ This checklist records documented legacy behavior and the intended Sniffit NG di
 
 | Legacy behavior | Sniffit NG disposition | Status |
 | --- | --- | --- |
-| `-i` curses live monitor | Preserve the connection-list-first workflow and familiar keyboard navigation. | Partial: offline viewer implemented; live capture pending |
+| `-i` curses live monitor | Preserve the connection-list-first workflow and familiar keyboard navigation. | Initial offline/live viewer implemented; additional parity interactions remain |
 | `-I` extended connection descriptions | Preserve useful protocol/port descriptions with bounded, sanitized text. | Planned |
 | Arrow keys / `j` / `k` selection | Preserve. | Implemented in offline viewer |
 | F1/F2 or `1`/`2` source/destination host masks | Preserve with validated IPv4 input and clear reset state. | Implemented in offline viewer |
