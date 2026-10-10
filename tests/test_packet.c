@@ -145,6 +145,39 @@ static void test_icmp_echo_metadata_and_payload_boundary(void)
     assert(sn_packet_parse_ethernet_ipv4(frame, frame_length, &view) == SN_PACKET_MALFORMED);
 }
 
+static void test_igmp_and_vrrp_headers(void)
+{
+    uint8_t frame[FRAME_CAPACITY];
+    struct sn_packet_view view;
+    size_t frame_length = make_ipv4_frame(frame, 2U, 8U);
+    uint8_t *igmp = frame + ETHERNET_HEADER_LENGTH + IPV4_HEADER_LENGTH;
+
+    igmp[0] = 0x16U;
+    igmp[4] = 239U;
+    igmp[5] = 1U;
+    igmp[6] = 2U;
+    igmp[7] = 3U;
+    assert(sn_packet_parse_ethernet_ipv4(frame, frame_length, &view) == SN_PACKET_OK);
+    assert(view.protocol == 2U && view.transport_header_present);
+    assert(view.payload_length == 0U);
+
+    frame_length = make_ipv4_frame(frame, 112U, 12U);
+    uint8_t *vrrp = frame + ETHERNET_HEADER_LENGTH + IPV4_HEADER_LENGTH;
+    vrrp[0] = 0x21U;
+    vrrp[1] = 7U;
+    vrrp[2] = 100U;
+    vrrp[3] = 1U;
+    vrrp[8] = 192U;
+    vrrp[9] = 0U;
+    vrrp[10] = 2U;
+    vrrp[11] = 1U;
+    assert(sn_packet_parse_ethernet_ipv4(frame, frame_length, &view) == SN_PACKET_OK);
+    assert(view.protocol == 112U && view.transport_header_present);
+
+    vrrp[3] = 2U;
+    assert(sn_packet_parse_ethernet_ipv4(frame, frame_length, &view) == SN_PACKET_MALFORMED);
+}
+
 static void test_malformed_transport_headers(void)
 {
     uint8_t frame[FRAME_CAPACITY];
@@ -191,6 +224,34 @@ static void test_fragment_and_vlan(void)
     assert(view.transport_header_present);
 }
 
+static void test_linux_cooked_sll_ipv4(void)
+{
+    uint8_t ethernet_frame[FRAME_CAPACITY];
+    uint8_t sll_frame[FRAME_CAPACITY] = {0};
+    struct sn_packet_view view;
+    size_t ethernet_length = make_ipv4_frame(ethernet_frame, 17U, 8U);
+    size_t sll_length = ethernet_length - ETHERNET_HEADER_LENGTH + 16U;
+
+    write_be16(ethernet_frame + ETHERNET_HEADER_LENGTH + IPV4_HEADER_LENGTH + 4U, 8U);
+    write_be16(sll_frame + 14U, 0x0800U);
+    memcpy(sll_frame + 16U, ethernet_frame + ETHERNET_HEADER_LENGTH,
+           ethernet_length - ETHERNET_HEADER_LENGTH);
+
+    assert(sn_packet_parse_link_ipv4(sll_frame, sll_length,
+                                     SN_PACKET_LINK_LINUX_SLL, &view) == SN_PACKET_OK);
+    assert(view.protocol == 17U);
+    assert(view.transport_header_present);
+    assert(view.source_ipv4[3] == 1U && view.destination_ipv4[3] == 2U);
+    assert(sn_packet_parse_link_ipv4(sll_frame, 15U,
+                                     SN_PACKET_LINK_LINUX_SLL, &view) ==
+           SN_PACKET_TRUNCATED);
+
+    write_be16(sll_frame + 14U, 0x0806U);
+    assert(sn_packet_parse_link_ipv4(sll_frame, sll_length,
+                                     SN_PACKET_LINK_LINUX_SLL, &view) ==
+           SN_PACKET_UNSUPPORTED);
+}
+
 static void test_unsupported_and_invalid_arguments(void)
 {
     uint8_t frame[FRAME_CAPACITY];
@@ -210,8 +271,10 @@ int main(void)
     test_malformed_ipv4_headers();
     test_valid_udp();
     test_icmp_echo_metadata_and_payload_boundary();
+    test_igmp_and_vrrp_headers();
     test_malformed_transport_headers();
     test_fragment_and_vlan();
+    test_linux_cooked_sll_ipv4();
     test_unsupported_and_invalid_arguments();
     puts("packet parser tests passed");
     return 0;

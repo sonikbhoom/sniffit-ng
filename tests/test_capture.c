@@ -19,7 +19,9 @@ static void write_be16(uint8_t *bytes, uint16_t value)
 static void create_test_pcap(char *path, size_t path_capacity, int link_type)
 {
     char path_template[] = "/tmp/sniffit-ng-capture-XXXXXX";
-    uint8_t frame[14] = {0};
+    uint8_t frame[16] = {0};
+    size_t frame_length = link_type == DLT_LINUX_SLL ? 16U : 14U;
+    size_t protocol_offset = link_type == DLT_LINUX_SLL ? 14U : 12U;
     struct pcap_pkthdr header = {0};
     pcap_t *dead_capture;
     pcap_dumper_t *dumper;
@@ -34,11 +36,11 @@ static void create_test_pcap(char *path, size_t path_capacity, int link_type)
     dumper = pcap_dump_open(dead_capture, path);
     assert(dumper != NULL);
 
-    write_be16(frame + 12U, 0x0800U);
+    write_be16(frame + protocol_offset, 0x0800U);
     header.ts.tv_sec = 123;
     header.ts.tv_usec = 456789;
-    header.caplen = sizeof(frame);
-    header.len = sizeof(frame) + 4U;
+    header.caplen = (bpf_u_int32)frame_length;
+    header.len = (bpf_u_int32)frame_length + 4U;
     pcap_dump((u_char *)dumper, &header, frame);
     assert(pcap_dump_flush(dumper) == 0);
 
@@ -64,6 +66,24 @@ static void test_offline_packet_lifetime_and_eof(void)
     assert(packet.timestamp.tv_usec == 456789);
     assert(sn_capture_next(capture, &packet, error, sizeof(error)) == SN_CAPTURE_EOF);
     assert(packet.data == NULL);
+    sn_capture_close(capture);
+    assert(unlink(path) == 0);
+}
+
+static void test_offline_sll_preserves_link_type(void)
+{
+    char path[64];
+    char error[256] = {0};
+    struct sn_capture_packet packet;
+    struct sn_capture *capture;
+
+    create_test_pcap(path, sizeof(path), DLT_LINUX_SLL);
+    capture = sn_capture_open_offline(path, error, sizeof(error));
+    assert(capture != NULL);
+    assert(sn_capture_next(capture, &packet, error, sizeof(error)) == SN_CAPTURE_PACKET);
+    assert(packet.link_type == SN_PACKET_LINK_LINUX_SLL);
+    assert(packet.captured_length == 16U);
+    assert(packet.wire_length == 20U);
     sn_capture_close(capture);
     assert(unlink(path) == 0);
 }
@@ -94,6 +114,7 @@ static void test_invalid_sources_and_arguments(void)
 int main(void)
 {
     test_offline_packet_lifetime_and_eof();
+    test_offline_sll_preserves_link_type();
     test_unsupported_link_type_is_rejected();
     test_invalid_sources_and_arguments();
     puts("capture tests passed");

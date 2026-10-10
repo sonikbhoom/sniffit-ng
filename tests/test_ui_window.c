@@ -70,6 +70,43 @@ static void test_service_hints_are_protocol_specific(void)
     assert(sn_ui_port_service_name(1U, 80U) == NULL);
 }
 
+static void test_flow_filter_direction_semantics(void)
+{
+    struct sn_flow flow = {0};
+    struct sn_ui_flow_filter filter = {0};
+
+    flow.protocol = 6U;
+    flow.endpoints[0].ipv4[0] = 10U;
+    flow.endpoints[0].ipv4[3] = 1U;
+    flow.endpoints[0].port = 1234U;
+    flow.endpoints[1].ipv4[0] = 10U;
+    flow.endpoints[1].ipv4[3] = 2U;
+    flow.endpoints[1].port = 443U;
+
+    assert(sn_ui_flow_matches(&flow, &filter));
+
+    filter.source_ip_enabled = true;
+    memcpy(filter.source_ip, flow.endpoints[0].ipv4, sizeof(filter.source_ip));
+    assert(sn_ui_flow_matches(&flow, &filter));
+
+    filter.destination_port_enabled = true;
+    filter.destination_port = 443U;
+    assert(sn_ui_flow_matches(&flow, &filter));
+
+    memcpy(filter.source_ip, flow.endpoints[1].ipv4, sizeof(filter.source_ip));
+    memcpy(filter.destination_ip, flow.endpoints[0].ipv4, sizeof(filter.destination_ip));
+    filter.destination_ip_enabled = true;
+    filter.source_port_enabled = true;
+    filter.source_port = 443U;
+    filter.destination_port = 1234U;
+    assert(sn_ui_flow_matches(&flow, &filter));
+
+    filter.destination_ip[3] = 3U;
+    assert(!sn_ui_flow_matches(&flow, &filter));
+    assert(!sn_ui_flow_matches(NULL, &filter));
+    assert(!sn_ui_flow_matches(&flow, NULL));
+}
+
 static void test_detail_navigation_and_dismissal(void)
 {
     assert(sn_ui_detail_navigation_direction(259, 259, 258) == -1);
@@ -92,6 +129,7 @@ int main(void)
     test_empty_and_out_of_range_inputs();
     test_flow_order_is_deterministic();
     test_service_hints_are_protocol_specific();
+    test_flow_filter_direction_semantics();
     test_detail_navigation_and_dismissal();
     puts("ui window tests passed");
     return 0;

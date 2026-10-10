@@ -8,6 +8,7 @@
 struct sn_capture {
     pcap_t *handle;
     bool live;
+    enum sn_packet_link_type link_type;
 };
 
 static void copy_error(char *destination, size_t capacity, const char *message)
@@ -24,13 +25,25 @@ static struct sn_capture *wrap_handle(
     size_t error_buffer_size)
 {
     struct sn_capture *capture;
+    enum sn_packet_link_type link_type;
+    int pcap_link_type;
 
     if (handle == NULL) {
         return NULL;
     }
-    if (pcap_datalink(handle) != DLT_EN10MB) {
-        copy_error(error_buffer, error_buffer_size,
-                   "unsupported link type: Sniffit NG currently requires Ethernet");
+    pcap_link_type = pcap_datalink(handle);
+    if (pcap_link_type == DLT_EN10MB) {
+        link_type = SN_PACKET_LINK_ETHERNET;
+#ifdef DLT_LINUX_SLL
+    } else if (pcap_link_type == DLT_LINUX_SLL) {
+        link_type = SN_PACKET_LINK_LINUX_SLL;
+#endif
+    } else {
+        char message[128];
+        (void)snprintf(message, sizeof(message),
+                       "unsupported link type: Sniffit NG does not support DLT %d",
+                       pcap_link_type);
+        copy_error(error_buffer, error_buffer_size, message);
         pcap_close(handle);
         return NULL;
     }
@@ -43,6 +56,7 @@ static struct sn_capture *wrap_handle(
     }
     capture->handle = handle;
     capture->live = live;
+    capture->link_type = link_type;
     copy_error(error_buffer, error_buffer_size, "");
     return capture;
 }
@@ -147,6 +161,7 @@ enum sn_capture_result sn_capture_next(
         packet->data = bytes;
         packet->captured_length = header->caplen;
         packet->wire_length = header->len;
+        packet->link_type = capture->link_type;
         packet->timestamp = header->ts;
         copy_error(error_buffer, error_buffer_size, "");
         return SN_CAPTURE_PACKET;

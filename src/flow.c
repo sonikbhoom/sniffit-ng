@@ -1,6 +1,7 @@
 #include "sniffit_ng/flow.h"
 
 #include <limits.h>
+#include <stdio.h>
 #include <string.h>
 
 struct flow_key {
@@ -48,7 +49,9 @@ static enum sn_flow_update_result make_flow_key(
     if (packet == NULL || key == NULL || packet->ipv4_total_length == 0U) {
         return SN_FLOW_INVALID;
     }
-    if (packet->protocol != 6U && packet->protocol != 17U && packet->protocol != 1U) {
+    if (packet->protocol != 6U && packet->protocol != 17U &&
+        packet->protocol != 1U && packet->protocol != 2U &&
+        packet->protocol != 112U) {
         return SN_FLOW_IGNORED;
     }
     if (!packet->transport_header_present || packet->transport == NULL ||
@@ -179,6 +182,20 @@ enum sn_flow_update_result sn_flow_table_update(
     increment_saturated(&slot->packets[key.direction], 1U);
     increment_saturated(&slot->bytes[key.direction], packet->ipv4_total_length);
     slot->last_seen_ns = timestamp_ns;
+    {
+        char decoded[SN_PACKET_DECODE_TEXT_CAPACITY];
+
+        if (sn_protocol_decode(packet, decoded, sizeof(decoded))) {
+            struct sn_packet_decode_record *record =
+                &slot->decode_history[slot->decode_history_next];
+            (void)snprintf(record->text, sizeof(record->text), "%s", decoded);
+            slot->decode_history_next =
+                (slot->decode_history_next + 1U) % SN_FLOW_DECODE_HISTORY_CAPACITY;
+            if (slot->decode_history_count < SN_FLOW_DECODE_HISTORY_CAPACITY) {
+                ++slot->decode_history_count;
+            }
+        }
+    }
     if (table->inspect_payloads && packet->protocol == 1U &&
         (packet->icmp_type == 0U || packet->icmp_type == 8U)) {
         size_t sample_length = packet->payload_length;
@@ -241,4 +258,19 @@ const struct sn_icmp_echo_sample *sn_flow_icmp_history_at(
                     flow->icmp_history_count) % SN_FLOW_ICMP_HISTORY_CAPACITY;
     return &flow->icmp_history[(oldest_index + chronological_index) %
                                SN_FLOW_ICMP_HISTORY_CAPACITY];
+}
+
+const struct sn_packet_decode_record *sn_flow_decode_history_at(
+    const struct sn_flow *flow,
+    size_t chronological_index)
+{
+    size_t oldest_index;
+
+    if (flow == NULL || chronological_index >= flow->decode_history_count) {
+        return NULL;
+    }
+    oldest_index = (flow->decode_history_next + SN_FLOW_DECODE_HISTORY_CAPACITY -
+                    flow->decode_history_count) % SN_FLOW_DECODE_HISTORY_CAPACITY;
+    return &flow->decode_history[(oldest_index + chronological_index) %
+                                 SN_FLOW_DECODE_HISTORY_CAPACITY];
 }

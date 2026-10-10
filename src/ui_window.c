@@ -110,6 +110,36 @@ const char *sn_ui_port_service_name(uint8_t protocol, uint16_t port)
     return NULL;
 }
 
+static bool endpoint_matches(const struct sn_flow_endpoint *endpoint,
+                             bool ip_enabled,
+                             const uint8_t ip[4],
+                             bool port_enabled,
+                             uint16_t port)
+{
+    return (!ip_enabled || (ip != NULL && memcmp(endpoint->ipv4, ip, 4U) == 0)) &&
+           (!port_enabled || endpoint->port == port);
+}
+
+bool sn_ui_flow_matches(const struct sn_flow *flow,
+                        const struct sn_ui_flow_filter *filter)
+{
+    if (flow == NULL || filter == NULL) {
+        return false;
+    }
+    for (size_t source = 0U; source < 2U; ++source) {
+        size_t destination = 1U - source;
+        if (endpoint_matches(&flow->endpoints[source],
+                             filter->source_ip_enabled, filter->source_ip,
+                             filter->source_port_enabled, filter->source_port) &&
+            endpoint_matches(&flow->endpoints[destination],
+                             filter->destination_ip_enabled, filter->destination_ip,
+                             filter->destination_port_enabled, filter->destination_port)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 int sn_ui_detail_navigation_direction(int key, int up_key, int down_key)
 {
     if (key == up_key || key == 'k' || key == 'K') {

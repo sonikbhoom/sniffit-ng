@@ -17,6 +17,8 @@ struct sn_monitor_stats {
     uint64_t tcp_packets;
     uint64_t udp_packets;
     uint64_t icmp_packets;
+    uint64_t igmp_packets;
+    uint64_t vrrp_packets;
     uint64_t tcp_bytes;
     uint64_t udp_bytes;
     uint64_t bad_ipv4_checksums;
@@ -32,6 +34,8 @@ struct sn_monitor_rates {
     uint64_t tcp_packets_per_second;
     uint64_t udp_packets_per_second;
     uint64_t icmp_packets_per_second;
+    uint64_t igmp_packets_per_second;
+    uint64_t vrrp_packets_per_second;
     uint64_t tcp_bytes_per_second;
     uint64_t udp_bytes_per_second;
 };

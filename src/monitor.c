@@ -121,6 +121,10 @@ bool sn_monitor_rate_sample(
         counter_delta(stats->udp_packets, sampler->previous.udp_packets) / elapsed_seconds;
     rates->icmp_packets_per_second =
         counter_delta(stats->icmp_packets, sampler->previous.icmp_packets) / elapsed_seconds;
+    rates->igmp_packets_per_second =
+        counter_delta(stats->igmp_packets, sampler->previous.igmp_packets) / elapsed_seconds;
+    rates->vrrp_packets_per_second =
+        counter_delta(stats->vrrp_packets, sampler->previous.vrrp_packets) / elapsed_seconds;
     rates->tcp_bytes_per_second =
         counter_delta(stats->tcp_bytes, sampler->previous.tcp_bytes) / elapsed_seconds;
     rates->udp_bytes_per_second =
@@ -154,8 +158,8 @@ enum sn_monitor_result sn_monitor_process(
         return SN_MONITOR_INVALID;
     }
 
-    parse_result = sn_packet_parse_ethernet_ipv4(
-        packet->data, packet->captured_length, &view);
+    parse_result = sn_packet_parse_link_ipv4(packet->data, packet->captured_length,
+                                              packet->link_type, &view);
     if (parse_result == SN_PACKET_TRUNCATED) {
         increment_saturated(&monitor->stats.truncated_packets);
         return SN_MONITOR_TRUNCATED;
@@ -186,6 +190,12 @@ enum sn_monitor_result sn_monitor_process(
         break;
     case 1U:
         increment_saturated(&monitor->stats.icmp_packets);
+        break;
+    case 2U:
+        increment_saturated(&monitor->stats.igmp_packets);
+        break;
+    case 112U:
+        increment_saturated(&monitor->stats.vrrp_packets);
         break;
     default:
         increment_saturated(&monitor->stats.unsupported_packets);

@@ -1,6 +1,8 @@
 #ifndef SNIFFIT_NG_CAPTURE_H
 #define SNIFFIT_NG_CAPTURE_H
 
+#include "sniffit_ng/packet.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -19,6 +21,7 @@ struct sn_capture_packet {
     const uint8_t *data;
     size_t captured_length;
     size_t wire_length;
+    enum sn_packet_link_type link_type;
     struct timeval timestamp;
 };
 

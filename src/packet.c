@@ -3,10 +3,13 @@
 #include <string.h>
 
 #define ETHERNET_HEADER_LENGTH 14U
+#define LINUX_SLL_HEADER_LENGTH 16U
 #define IPV4_MIN_HEADER_LENGTH 20U
 #define TCP_MIN_HEADER_LENGTH 20U
 #define UDP_HEADER_LENGTH 8U
 #define ICMP_MIN_HEADER_LENGTH 4U
+#define IGMP_MIN_HEADER_LENGTH 8U
+#define VRRP_MIN_HEADER_LENGTH 8U
 #define IPV4_ETHERTYPE 0x0800U
 #define VLAN_ETHERTYPE 0x8100U
 #define QINQ_ETHERTYPE 0x88a8U
@@ -44,7 +47,18 @@ enum sn_packet_result sn_packet_parse_ethernet_ipv4(
     size_t captured_length,
     struct sn_packet_view *view)
 {
-    size_t network_offset = ETHERNET_HEADER_LENGTH;
+    return sn_packet_parse_link_ipv4(captured, captured_length,
+                                     SN_PACKET_LINK_ETHERNET, view);
+}
+
+enum sn_packet_result sn_packet_parse_link_ipv4(
+    const uint8_t *captured,
+    size_t captured_length,
+    enum sn_packet_link_type link_type,
+    struct sn_packet_view *view)
+{
+    size_t network_offset;
+    size_t protocol_offset;
     uint16_t ethertype;
     const uint8_t *ip;
     size_t ip_header_length;
@@ -59,11 +73,20 @@ enum sn_packet_result sn_packet_parse_ethernet_ipv4(
     if (captured == NULL) {
         return SN_PACKET_MALFORMED;
     }
-    if (captured_length < ETHERNET_HEADER_LENGTH) {
+    if (link_type == SN_PACKET_LINK_ETHERNET) {
+        network_offset = ETHERNET_HEADER_LENGTH;
+        protocol_offset = 12U;
+    } else if (link_type == SN_PACKET_LINK_LINUX_SLL) {
+        network_offset = LINUX_SLL_HEADER_LENGTH;
+        protocol_offset = 14U;
+    } else {
+        return SN_PACKET_UNSUPPORTED;
+    }
+    if (captured_length < network_offset) {
         return SN_PACKET_TRUNCATED;
     }
 
-    ethertype = read_be16(captured + 12);
+    ethertype = read_be16(captured + protocol_offset);
     for (size_t vlan_depth = 0; is_vlan_ethertype(ethertype); ++vlan_depth) {
         if (vlan_depth == 2U) {
             return SN_PACKET_MALFORMED;
@@ -175,6 +198,36 @@ enum sn_packet_result sn_packet_parse_ethernet_ipv4(
         }
         view->transport_header_present = true;
         return SN_PACKET_OK;
+    case 2U:
+        if (ip_payload_length < IGMP_MIN_HEADER_LENGTH) {
+            return SN_PACKET_MALFORMED;
+        }
+        view->payload = view->transport + IGMP_MIN_HEADER_LENGTH;
+        view->payload_length = ip_payload_length - IGMP_MIN_HEADER_LENGTH;
+        view->transport_header_present = true;
+        return SN_PACKET_OK;
+    case 112U: {
+        uint8_t version;
+        uint8_t packet_type;
+        size_t address_count;
+        size_t header_length;
+
+        if (ip_payload_length < VRRP_MIN_HEADER_LENGTH) {
+            return SN_PACKET_MALFORMED;
+        }
+        version = (uint8_t)(view->transport[0] >> 4);
+        packet_type = (uint8_t)(view->transport[0] & 0x0fU);
+        address_count = view->transport[3];
+        header_length = VRRP_MIN_HEADER_LENGTH + address_count * 4U;
+        if ((version != 2U && version != 3U) || packet_type != 1U ||
+            header_length > ip_payload_length) {
+            return SN_PACKET_MALFORMED;
+        }
+        view->payload = view->transport + header_length;
+        view->payload_length = ip_payload_length - header_length;
+        view->transport_header_present = true;
+        return SN_PACKET_OK;
+    }
     default:
         return SN_PACKET_UNSUPPORTED;
     }

@@ -12,20 +12,9 @@
 #include <strings.h>
 #include <time.h>
 
-struct ui_filter {
-    bool source_ip_enabled;
-    bool destination_ip_enabled;
-    bool source_port_enabled;
-    bool destination_port_enabled;
-    uint8_t source_ip[4];
-    uint8_t destination_ip[4];
-    uint16_t source_port;
-    uint16_t destination_port;
-};
-
 struct ui_detail_context {
     struct sn_monitor *monitor;
-    const struct ui_filter *filter;
+    const struct sn_ui_flow_filter *filter;
     const struct sn_flow **flows;
     size_t flow_count;
     size_t *selected;
@@ -38,41 +27,15 @@ struct ui_detail_context {
     const struct sn_monitor_rates *rates;
 };
 
-static bool endpoint_matches(const struct sn_flow_endpoint *endpoint,
-                             bool ip_enabled,
-                             const uint8_t ip[4],
-                             bool port_enabled,
-                             uint16_t port)
-{
-    return (!ip_enabled || memcmp(endpoint->ipv4, ip, 4U) == 0) &&
-           (!port_enabled || endpoint->port == port);
-}
-
-static bool flow_matches(const struct sn_flow *flow, const struct ui_filter *filter)
-{
-    for (size_t source = 0U; source < 2U; ++source) {
-        size_t destination = 1U - source;
-        if (endpoint_matches(&flow->endpoints[source],
-                             filter->source_ip_enabled, filter->source_ip,
-                             filter->source_port_enabled, filter->source_port) &&
-            endpoint_matches(&flow->endpoints[destination],
-                             filter->destination_ip_enabled, filter->destination_ip,
-                             filter->destination_port_enabled, filter->destination_port)) {
-            return true;
-        }
-    }
-    return false;
-}
-
 static size_t collect_flows(struct sn_monitor *monitor,
-                            const struct ui_filter *filter,
+                            const struct sn_ui_flow_filter *filter,
                             const struct sn_flow **flows)
 {
     size_t count = 0U;
 
     for (size_t index = 0U; index < SN_FLOW_TABLE_CAPACITY; ++index) {
         const struct sn_flow *flow = &monitor->flows.entries[index];
-        if (flow->active && flow_matches(flow, filter)) {
+        if (flow->active && sn_ui_flow_matches(flow, filter)) {
             flows[count++] = flow;
         }
     }
@@ -89,6 +52,10 @@ static const char *protocol_name(uint8_t protocol)
         return "UDP";
     case 1U:
         return "ICMP";
+    case 2U:
+        return "IGMP";
+    case 112U:
+        return "VRRP";
     default:
         return "IP";
     }
@@ -104,7 +71,7 @@ static uint64_t monotonic_time_ns(void)
     return (uint64_t)now.tv_sec * 1000000000ULL + (uint64_t)now.tv_nsec;
 }
 
-static void draw_filter_line(const struct ui_filter *filter)
+static void draw_filter_line(const struct sn_ui_flow_filter *filter)
 {
     char source[INET_ADDRSTRLEN] = "All";
     char destination[INET_ADDRSTRLEN] = "All";
@@ -126,7 +93,7 @@ static void draw_filter_line(const struct ui_filter *filter)
 }
 
 static void draw_screen(struct sn_monitor *monitor,
-                        const struct ui_filter *filter,
+                        const struct sn_ui_flow_filter *filter,
                         const struct sn_flow **flows,
                         size_t flow_count,
                         size_t selected,
@@ -203,17 +170,23 @@ static void draw_screen(struct sn_monitor *monitor,
             mvprintw(stats_row + 1, 0, "Bytes/sec: TCP %llu  UDP %llu",
                      (unsigned long long)rates->tcp_bytes_per_second,
                      (unsigned long long)rates->udp_bytes_per_second);
+            mvprintw(stats_row + 2, 0, "IGMP/sec: %llu  VRRP/sec: %llu",
+                     (unsigned long long)rates->igmp_packets_per_second,
+                     (unsigned long long)rates->vrrp_packets_per_second);
         } else {
             mvprintw(stats_row, 0, "Packet totals: IP %llu  TCP %llu  UDP %llu  ICMP %llu",
                      (unsigned long long)monitor->stats.ipv4_packets,
                      (unsigned long long)monitor->stats.tcp_packets,
                      (unsigned long long)monitor->stats.udp_packets,
                      (unsigned long long)monitor->stats.icmp_packets);
-            mvprintw(stats_row + 1, 0, "Byte totals: TCP %llu  UDP %llu",
+            mvprintw(stats_row + 1, 0, "Packet totals: IGMP %llu  VRRP %llu",
+                     (unsigned long long)monitor->stats.igmp_packets,
+                     (unsigned long long)monitor->stats.vrrp_packets);
+            mvprintw(stats_row + 2, 0, "Byte totals: TCP %llu  UDP %llu",
                      (unsigned long long)monitor->stats.tcp_bytes,
                      (unsigned long long)monitor->stats.udp_bytes);
         }
-        mvprintw(stats_row + 2, 0, "Truncated: %llu  Malformed: %llu  Unsupported: %llu  Dropped UI events: %llu",
+        mvprintw(stats_row + 3, 0, "Truncated: %llu  Malformed: %llu  Unsupported: %llu  Dropped UI events: %llu",
                  (unsigned long long)monitor->stats.truncated_packets,
                  (unsigned long long)monitor->stats.malformed_packets,
                  (unsigned long long)monitor->stats.unsupported_packets,
@@ -332,6 +305,14 @@ static void append_icmp_sample(WINDOW *history,
     (void)waddch(history, '\n');
 }
 
+static void append_decode_record(WINDOW *history,
+                                 const struct sn_packet_decode_record *record)
+{
+    if (record != NULL && record->text[0] != '\0') {
+        (void)wprintw(history, "%s\n\n", record->text);
+    }
+}
+
 static void refresh_detail_panel(WINDOW *panel, WINDOW *history, int panel_x)
 {
     int history_height = LINES - 11;
@@ -350,6 +331,8 @@ static void append_matching_events(struct sn_monitor *monitor,
                                    bool payload_inspection_active,
                                    size_t *seen_count,
                                    size_t *seen_next,
+                                   size_t *seen_decode_count,
+                                   size_t *seen_decode_next,
                                    int panel_x)
 {
     struct sn_monitor_event event;
@@ -367,6 +350,17 @@ static void append_matching_events(struct sn_monitor *monitor,
         (void)mvwprintw(panel, 6, 2, "Bytes A>B/B>A: %llu/%llu",
                         (unsigned long long)updated->bytes[0],
                         (unsigned long long)updated->bytes[1]);
+
+        if (updated->decode_history_count > 0U &&
+            (updated->decode_history_count != *seen_decode_count ||
+             updated->decode_history_next != *seen_decode_next)) {
+            const struct sn_packet_decode_record *record =
+                sn_flow_decode_history_at(updated, updated->decode_history_count - 1U);
+            append_decode_record(history, record);
+            *seen_decode_count = updated->decode_history_count;
+            *seen_decode_next = updated->decode_history_next;
+            changed = true;
+        }
 
         if (payload_inspection_active &&
             (updated->icmp_history_count != *seen_count ||
@@ -396,6 +390,8 @@ static void draw_detail_contents(struct ui_detail_context *context,
                                  int panel_x,
                                  size_t *seen_count,
                                  size_t *seen_next,
+                                 size_t *seen_decode_count,
+                                 size_t *seen_decode_next,
                                  bool load_history)
 {
     const char *service_a = sn_ui_port_service_name(flow->protocol,
@@ -407,6 +403,8 @@ static void draw_detail_contents(struct ui_detail_context *context,
         (void)werase(history);
         *seen_count = flow->icmp_history_count;
         *seen_next = flow->icmp_history_next;
+        *seen_decode_count = flow->decode_history_count;
+        *seen_decode_next = flow->decode_history_next;
     }
     (void)werase(panel);
     (void)box(panel, 0, 0);
@@ -433,6 +431,9 @@ static void draw_detail_contents(struct ui_detail_context *context,
     if (!load_history) {
         return;
     }
+    for (size_t index = 0U; index < flow->decode_history_count; ++index) {
+        append_decode_record(history, sn_flow_decode_history_at(flow, index));
+    }
     if (flow->protocol == 1U && context->payload_inspection_active) {
         for (size_t index = 0U; index < flow->icmp_history_count; ++index) {
             const struct sn_icmp_echo_sample *sample =
@@ -449,8 +450,10 @@ static void draw_detail_contents(struct ui_detail_context *context,
                        "ICMP payload inspection is disabled.\n"
                        "Enable --inspect-payloads and add the acknowledged config comment.\n"
                        "No payload bytes are retained.\n");
-    } else {
-        (void)waddstr(history, "Per-packet payload inspection is not enabled for this protocol.\n");
+    } else if (flow->decode_history_count == 0U) {
+        (void)waddstr(history,
+                       "No protocol summary is available for this flow.\n"
+                       "Payload bytes are hidden.\n");
     }
     refresh_detail_panel(panel, history, panel_x);
 }
@@ -493,6 +496,8 @@ static void show_details(struct ui_detail_context *context,
     int history_width = panel_width - 4;
     size_t seen_count = 0U;
     size_t seen_next = 0U;
+    size_t seen_decode_count = 0U;
+    size_t seen_decode_next = 0U;
     WINDOW *panel = newwin(LINES, panel_width, 0, panel_x);
     WINDOW *history = newpad(8192, history_width);
     int key;
@@ -509,7 +514,8 @@ static void show_details(struct ui_detail_context *context,
     (void)scrollok(history, true);
     (void)idlok(history, true);
     draw_detail_contents(context, &identity, panel, history, panel_x,
-                         &seen_count, &seen_next, true);
+                         &seen_count, &seen_next,
+                         &seen_decode_count, &seen_decode_next, true);
 
     for (;;) {
         key = getch();
@@ -522,7 +528,8 @@ static void show_details(struct ui_detail_context *context,
                 } else if (result == SN_UI_POLL_UPDATED) {
                     append_matching_events(context->monitor, &identity, panel, history,
                                            context->payload_inspection_active,
-                                           &seen_count, &seen_next, panel_x);
+                                           &seen_count, &seen_next,
+                                           &seen_decode_count, &seen_decode_next, panel_x);
                 }
             }
             continue;
@@ -537,7 +544,8 @@ static void show_details(struct ui_detail_context *context,
             (void)wresize(history, 8192, history_width);
             draw_detail_background(context);
             draw_detail_contents(context, &identity, panel, history, panel_x,
-                                 &seen_count, &seen_next, false);
+                                 &seen_count, &seen_next,
+                                 &seen_decode_count, &seen_decode_next, false);
             refresh_detail_panel(panel, history, panel_x);
             continue;
         }
@@ -562,7 +570,8 @@ static void show_details(struct ui_detail_context *context,
                     draw_detail_background(context);
                     identity = *context->flows[next];
                     draw_detail_contents(context, &identity, panel, history, panel_x,
-                                         &seen_count, &seen_next, true);
+                                         &seen_count, &seen_next,
+                                         &seen_decode_count, &seen_decode_next, true);
                 }
             }
             continue;
@@ -592,7 +601,7 @@ int sn_ui_run(struct sn_monitor *monitor,
               sn_ui_poll_callback poll_capture,
               void *poll_context)
 {
-    struct ui_filter filter = {0};
+    struct sn_ui_flow_filter filter = {0};
     const struct sn_flow *flows[SN_FLOW_TABLE_CAPACITY];
     size_t selected = 0U;
     size_t scroll_start = 0U;

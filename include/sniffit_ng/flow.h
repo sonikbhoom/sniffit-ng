@@ -2,6 +2,7 @@
 #define SNIFFIT_NG_FLOW_H
 
 #include "sniffit_ng/packet.h"
+#include "sniffit_ng/protocol_decode.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -36,6 +37,9 @@ struct sn_flow {
     struct sn_icmp_echo_sample icmp_history[SN_FLOW_ICMP_HISTORY_CAPACITY];
     size_t icmp_history_count;
     size_t icmp_history_next;
+    struct sn_packet_decode_record decode_history[SN_FLOW_DECODE_HISTORY_CAPACITY];
+    size_t decode_history_count;
+    size_t decode_history_next;
 };
 
 struct sn_flow_table {
@@ -65,6 +69,10 @@ enum sn_flow_update_result sn_flow_table_update(
 size_t sn_flow_table_count(const struct sn_flow_table *table);
 
 const struct sn_icmp_echo_sample *sn_flow_icmp_history_at(
+    const struct sn_flow *flow,
+    size_t chronological_index);
+
+const struct sn_packet_decode_record *sn_flow_decode_history_at(
     const struct sn_flow *flow,
     size_t chronological_index);
 

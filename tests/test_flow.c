@@ -257,6 +257,39 @@ static void test_icmp_history_keeps_recent_samples_in_order(void)
     assert(sn_flow_icmp_history_at(flow, SN_FLOW_ICMP_HISTORY_CAPACITY) == NULL);
 }
 
+static void test_protocol_decode_history_is_bounded_metadata(void)
+{
+    struct sn_flow_table table;
+    struct sn_packet_view packet = {0};
+    const struct sn_flow *flow = NULL;
+    uint8_t igmp[8] = {0x16U, 0U, 0U, 0U, 239U, 1U, 2U, 3U};
+
+    packet.protocol = 2U;
+    packet.ipv4_total_length = 28U;
+    packet.source_ipv4[0] = 192U;
+    packet.source_ipv4[3] = 1U;
+    packet.destination_ipv4[0] = 192U;
+    packet.destination_ipv4[3] = 2U;
+    packet.transport = igmp;
+    packet.transport_length = sizeof(igmp);
+    packet.transport_header_present = true;
+
+    sn_flow_table_init(&table, UINT64_MAX);
+    assert(!table.inspect_payloads);
+    for (uint64_t sequence = 0U;
+         sequence < SN_FLOW_DECODE_HISTORY_CAPACITY + 4U; ++sequence) {
+        igmp[7] = (uint8_t)sequence;
+        assert(sn_flow_table_update(&table, &packet, sequence + 1U, &flow) ==
+               (sequence == 0U ? SN_FLOW_CREATED : SN_FLOW_UPDATED));
+    }
+    assert(flow->decode_history_count == SN_FLOW_DECODE_HISTORY_CAPACITY);
+    assert(strstr(sn_flow_decode_history_at(flow, 0U)->text, "239.1.2.4") != NULL);
+    assert(strstr(sn_flow_decode_history_at(flow,
+                   SN_FLOW_DECODE_HISTORY_CAPACITY - 1U)->text,
+                   "239.1.2.19") != NULL);
+    assert(sn_flow_decode_history_at(flow, SN_FLOW_DECODE_HISTORY_CAPACITY) == NULL);
+}
+
 int main(void)
 {
     test_reverse_packets_update_one_flow();
@@ -267,6 +300,7 @@ int main(void)
     test_counters_saturate();
     test_icmp_payload_requires_opt_in_and_is_bounded();
     test_icmp_history_keeps_recent_samples_in_order();
+    test_protocol_decode_history_is_bounded_metadata();
     puts("flow tests passed");
     return 0;
 }

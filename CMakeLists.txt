@@ -10,13 +10,65 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(PCAP REQUIRED IMPORTED_TARGET libpcap)
 pkg_check_modules(NCURSESW REQUIRED IMPORTED_TARGET ncursesw)
 option(SNIFFIT_NG_ENABLE_SANITIZERS "Build with AddressSanitizer and UBSan" OFF)
+set(SNIFFIT_NG_CUSTOM_HTTP_DECODER_SOURCE "" CACHE FILEPATH
+    "Optional user-supplied HTTP metadata extension source (disabled by default)")
 
 add_library(sniffit_packet STATIC src/packet.c)
 target_include_directories(sniffit_packet PUBLIC include)
 
+add_library(sniffit_decode STATIC
+    src/protocol_decode.c
+    src/decode_icmp.c
+    src/decode_tcp.c
+    src/decode_http.c
+    src/decode_udp.c
+    src/decode_igmp.c
+    src/decode_snmp.c
+    src/decode_vrrp.c
+    src/decode_dns.c
+    src/decode_dhcp4.c
+    src/decode_ntp.c
+    src/decode_tls.c
+    src/decode_quic.c
+    src/decode_rtp.c
+    src/decode_rtcp.c
+    src/decode_syslog.c
+    src/decode_radius.c
+    src/decode_tacacs.c
+    src/decode_icmpv6.c
+    src/decode_ndp.c
+    src/decode_dhcp6.c
+    src/decode_ospf3.c
+    src/decode_ripng.c
+    src/decode_arp.c
+    src/decode_lldp.c
+    src/decode_cdp.c
+    src/decode_stp.c
+    src/decode_rstp.c
+    src/decode_lacp.c
+    src/decode_bgp.c
+    src/decode_ospf2.c
+    src/decode_isis.c
+    src/decode_rip.c
+    src/decode_hsrp.c
+    src/decode_glbp.c
+    src/decode_mpls.c
+    src/decode_gre.c
+    src/decode_ipip.c
+    src/decode_vxlan.c
+    src/decode_geneve.c
+)
+if(SNIFFIT_NG_CUSTOM_HTTP_DECODER_SOURCE)
+    target_sources(sniffit_decode PRIVATE "${SNIFFIT_NG_CUSTOM_HTTP_DECODER_SOURCE}")
+else()
+    target_sources(sniffit_decode PRIVATE src/decode_http_extension_default.c)
+endif()
+target_include_directories(sniffit_decode PUBLIC include PRIVATE src)
+target_link_libraries(sniffit_decode PUBLIC sniffit_packet)
+
 add_library(sniffit_flow STATIC src/flow.c)
 target_include_directories(sniffit_flow PUBLIC include)
-target_link_libraries(sniffit_flow PUBLIC sniffit_packet)
+target_link_libraries(sniffit_flow PUBLIC sniffit_packet sniffit_decode)
 
 add_library(sniffit_capture STATIC src/capture.c)
 target_include_directories(sniffit_capture PUBLIC include)
@@ -55,6 +107,9 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(sniffit_flow PRIVATE
         -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
     )
+    target_compile_options(sniffit_decode PRIVATE
+        -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+    )
     target_compile_options(sniffit_capture PRIVATE
         -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
     )
@@ -87,6 +142,16 @@ if(BUILD_TESTING)
         )
     endif()
     add_test(NAME packet_parser COMMAND test_packet)
+
+    add_executable(test_protocol_decode tests/test_protocol_decode.c)
+    target_include_directories(test_protocol_decode PRIVATE src)
+    target_link_libraries(test_protocol_decode PRIVATE sniffit_decode)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(test_protocol_decode PRIVATE
+            -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+        )
+    endif()
+    add_test(NAME protocol_decoders COMMAND test_protocol_decode)
 
     add_executable(test_flow tests/test_flow.c)
     target_link_libraries(test_flow PRIVATE sniffit_flow)
@@ -200,7 +265,7 @@ if(BUILD_TESTING)
 endif()
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND SNIFFIT_NG_ENABLE_SANITIZERS)
-    foreach(target sniffit_packet sniffit_flow sniffit_capture sniffit_monitor sniffit_payload_log sniffit_privilege sniffit_config sniffit_ui sniffit-ng test_ui_window test_config test_icmp_payload_view)
+    foreach(target sniffit_packet sniffit_decode sniffit_flow sniffit_capture sniffit_monitor sniffit_payload_log sniffit_privilege sniffit_config sniffit_ui sniffit-ng test_ui_window test_config test_icmp_payload_view)
         target_compile_options(${target} PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
         target_link_options(${target} PUBLIC -fsanitize=address,undefined)
     endforeach()

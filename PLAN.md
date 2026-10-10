@@ -41,6 +41,7 @@ At each inspection checkpoint, report: deliverable completed, exact command/test
 
 - **Offline capture pipeline:** Passed with ASan/UBSan. The generated pcap traversed libpcap, the bounded parser, and flow state; valid, truncated (`caplen < wire length`), malformed, and EOF outcomes were asserted.
 - **Live loopback capture:** The post-drop test now waits on libpcap's selectable fd and uses the permitted-only `CAP_NET_RAW` path. A non-sanitized probe with temporary `cap_net_raw+p` passed after opening pcap, dropping capabilities, and capturing its own loopback UDP packet. The regular ASan/UBSan run skips live pcap because the test runner lacks `CAP_NET_RAW`.
+- **Linux cooked capture and live NTP:** The user confirmed live capture on `ppp0` (libpcap DLT_LINUX_SLL). `ntpdate -4 -q time.nrc.ca` succeeded against `132.246.11.227` at stratum 2; the curses detail pane showed one request/reply pair and decoded NTPv4 client/server metadata, including server precision `-25` and reference ID `84f60be9`.
 - **Gate status:** Offline and post-drop loopback capture gates passed. The user confirmed the live curses application now renders successfully with the capability-backed capture path. This closes the initial live UI bring-up gate; remaining parity interactions and longer-running capture behavior stay on the feature checklist.
 - **Rate panel:** A deterministic three-second packet/byte sampler is implemented and unit-tested. The user confirmed the live rate display check is complete; the temporary file capability was removed afterward.
 - **ICMP Enter details:** A right-side pane preserves the flow list on the left. Echo request/reply type, direction, identifier, sequence, and 64-byte hex/ASCII records append to a scrolling history as packets arrive; up to 16 records/flow are retained in memory. The pane does not repaint on idle polls and closes on any key. Config acknowledgment gates all payload retention; no payload is written to disk by this feature.
@@ -84,9 +85,46 @@ The user has explicitly authorized development and testing of live capture again
 ## Remaining Refactor Work
 
 1. **LAN ping display:** Verified against authorized host `razorback` (`192.168.1.6`) with eight successful pings and live GUI confirmation. No broader LAN scan was performed.
-2. **Complete UI parity:** Flow-list scrolling/resize clamping, deterministic protocol/endpoint ordering, bounded TCP/UDP service hints, and a split, append-only inspection pane are implemented with focused tests; capture polling continues while details are open, and navigation keys switch the inspected flow without closing the pane. Remaining: more detailed filter semantics. The initial list/details/mask/statistics/reset/quit workflow exists but is not full legacy parity.
+2. **Complete UI parity:** Flow-list scrolling/resize clamping, deterministic protocol/endpoint ordering, bounded TCP/UDP service hints, a split append-only inspection pane, and documented bidirectional host/port mask semantics are implemented with focused tests. Capture polling continues while details are open, and navigation keys switch the inspected flow without closing the pane. The initial list/details/mask/statistics/reset/quit workflow exists but is not full legacy parity.
 3. **Configuration and compatibility:** The bounded `inspect_payloads` config and exact ethics-marker validation are implemented. Remaining: add an explicitly mapped legacy CLI/config subset; preserve only validated semantics.
 4. **Output modes:** Add safe pcap recording and selected summary/dump modes. Keep cleartext payload output disabled unless the runtime acknowledgment policy is satisfied.
 5. **Hardening:** Add parser fuzz targets, broader malformed-pcap corpus, pseudo-terminal curses interaction tests, and privilege/capability tests across supported Linux environments. Decide and document behavior for non-Ethernet link types.
 6. **CPack packaging:** Add CPack configuration for RPM and DEB packages with explicit package metadata, runtime dependencies, install paths, and clean uninstall behavior. Validate package contents and install/remove in disposable environments; build both formats in CI where the required host tooling is available. Packages must not carry `CAP_NET_RAW` file capabilities; document post-install capability setup separately and warn that capabilities on user-writable binaries are unsafe.
 7. **Release/hardening:** Add CI for sanitizer tests, document installation/file-capability policy, and decide licensing before inviting reuse/contributions. The initial milestone is already published. Never grant file capabilities to a developer-writable binary for deployment.
+8. **Protocol decoding roadmap:** Separate bounded modules now decode TCP, generic UDP, ICMP, IGMP, VRRP, and SNMP-over-UDP metadata; SNMP output omits community strings and varbind values. Continue with the prioritized protocol list below. Each decoder must consume a bounded packet view, emit metadata by default, and have valid, truncated, malformed, and boundary fixtures. Never display credentials, community strings, keys, or arbitrary application payload by default; keep any approved content inspection opt-in and separate from persistent logging.
+
+### Protocol Decoder Backlog
+
+The capture/parser foundation is currently Ethernet plus IPv4. Prioritize decoders that fit that foundation first, and treat IPv6 or other link types as explicit prerequisite work rather than pretending their packets are already supported.
+
+**Next on current Ethernet/IPv4 path:**
+
+- **HTTP/1.x over TCP:** Implemented for packet-local start lines on ports 80, 8000, and 8080. Summaries include request method/validated Host or response status and allowlisted Server/Content-Type/Content-Length; paths, cookies, authorization headers, and bodies are omitted. TCP stream reassembly is not implemented, so split start lines may be missed. `SNIFFIT_NG_CUSTOM_HTTP_DECODER_SOURCE` is an explicit build-time analyst hook; default implementation is inert, receives one bounded segment, and its output is constrained to printable ASCII.
+- **DNS (UDP and TCP):** transaction ID, query/response, opcode/rcode, question and answer counts, and safely decoded names with compression-loop/depth limits. Never surface arbitrary TXT contents by default.
+- **DHCPv4 / BOOTP (UDP):** message type, transaction ID, client hardware address, lease timing, and selected network options; bound option iteration and avoid logging unrelated option data.
+- **NTP (UDP):** Implemented in `src/decode_ntp.c` and dispatched from UDP port 123. It reports mode, version, leap indicator, stratum, poll/precision, and a hex reference identifier; timestamps are omitted. Focused tests cover valid, short, unsupported-mode, and small-output cases.
+- **TLS over TCP:** record and handshake type/version, SNI and ALPN only as a separate privacy-reviewed metadata option; do not decode certificates or application records by default.
+- **QUIC over UDP:** invariant-header version, packet form, and safely bounded connection-ID lengths; deeper Initial/handshake parsing is a later opt-in metadata enhancement.
+- **RTP/RTCP over UDP:** header version, payload type, sequence, timestamp, SSRC, and RTCP packet type/counts; no media payload decoding.
+- **Syslog over UDP/TCP:** message framing and bounded facility/severity where present; message text may contain secrets and stays hidden by default.
+- **RADIUS and TACACS+:** packet code/type, identifier, declared length, and bounded attribute/tag counts; do not decode authentication data or secret-bearing attributes.
+
+**After adding IPv6 parsing:**
+
+- **ICMPv6 and Neighbor Discovery:** echo/error types plus bounded Router Solicitation/Advertisement, Neighbor Solicitation/Advertisement, and Redirect metadata; validate extension-header and option lengths.
+- **DHCPv6:** message type, transaction ID, relay depth, and option codes/lengths with strict nesting and size limits.
+- **OSPFv3 and RIPng:** routing-control message type, router/area identifiers, and bounded entry counts; do not infer routes from malformed or partial advertisements.
+
+**After adding link-layer and routing protocol support:**
+
+- **ARP:** request/reply, sender/target protocol addresses, and operation; requires an Ethernet/ARP parser path outside IPv4.
+- **LLDP and optionally CDP:** chassis/port identifiers, TTL, and bounded TLV summaries; CDP is vendor-specific and should remain optional.
+- **STP/RSTP and LACP:** bridge/root identifiers, port/state, actor/partner state, and bounded control TLVs; requires non-IP Ethernet protocol dispatch.
+- **BGP:** message type/length and safe OPEN/KEEPALIVE/NOTIFICATION/UPDATE summaries; later expose bounded AS-path/prefix counts only after IPv4/IPv6 NLRI parsing is tested.
+- **OSPFv2, IS-IS, and RIP:** control-message type, identifiers, and bounded adjacency/route-entry counts; IS-IS requires its own link-layer framing and must not be forced through IPv4 parsing.
+- **HSRP/GLBP:** version, message/state, group/virtual-router ID, and priority; keep vendor-specific field handling isolated.
+- **MPLS, GRE, IP-in-IP, VXLAN, and Geneve:** bounded encapsulation labels/keys/VNI and inner-frame dispatch, with recursion-depth and total-byte limits to prevent tunnel nesting abuse.
+
+Each remaining backlog entry has an isolated placeholder source module under `src/decode_*.c`. These stubs are compiled but deliberately not called by the active dispatcher; they return "not decoded" and do not claim protocol support. Replace a stub only when its parser prerequisites and focused malformed/truncated fixtures are ready.
+
+**Cross-cutting requirements:** Keep decoders in protocol-specific modules behind a dispatcher; expose decoder capability/status separately from payload-inspection consent; never let decoder output affect packet acceptance or flow accounting. Add IPv6, Ethernet-II protocol dispatch, and any required DLT/link-type support before claiming coverage for protocols that depend on them. Do not send probes to discover protocol support; use generated fixtures and authorized local traffic only.

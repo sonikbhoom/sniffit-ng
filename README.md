@@ -1,10 +1,12 @@
 # Sniffit NG
 
-Sniffit NG is a security-focused C successor to the legacy Sniffit monitor, developed in a separate source tree. It currently supports bounded Ethernet/IPv4 parsing, offline pcap replay, privilege-reduced live capture, flow summaries, and an ncurses monitor.
+Sniffit NG is a security-focused C successor to the legacy Sniffit monitor, developed in a separate source tree. It currently supports bounded Ethernet and Linux cooked v1 (SLL) IPv4 parsing, offline pcap replay, privilege-reduced live capture, flow summaries, and an ncurses monitor.
 
 This repository currently has no license. Public visibility does not itself grant permission to reuse, modify, or redistribute the code.
 
-In the live curses view, select a flow and press Enter to open its inspection pane on the right while leaving the flow list visible on the left. The header includes fixed service hints for common TCP/UDP ports; it does not derive labels from packet contents. ICMP Echo request/reply records append to a scrolling history as packets arrive, below the flow metadata. The pane preloads up to 16 recent samples (up to 64 payload bytes each) when opened. It stays stable rather than repainting on idle polls; arrow keys or `j`/`k` switch the inspected flow, and other keys close the pane.
+In the live curses view, select a flow and press Enter to open its inspection pane on the right while leaving the flow list visible on the left. The pane appends bounded metadata records for TCP, generic UDP, ICMP, IGMP, VRRP, and SNMP over UDP. SNMP community strings and varbind values are never displayed. The header includes fixed service hints for common TCP/UDP ports; it does not derive labels from packet contents. ICMP Echo payload samples remain separately gated by the acknowledged inspection setting. The pane stays stable rather than repainting on idle polls; arrow keys or `j`/`k` switch the inspected flow, and other keys close the pane.
+
+Flow masks affect which connections are shown, not which packets are captured or counted. Source and destination host/port masks are optional and combine as endpoint pairs; because each flow is bidirectional, either traffic direction can satisfy the pair. Setting a host mask to `all` or a port mask to `0` clears that individual mask.
 
 ## Build and test
 
