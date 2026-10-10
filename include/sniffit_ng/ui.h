@@ -6,12 +6,19 @@
 
 #include <stdbool.h>
 
-typedef const char *(*sn_ui_poll_callback)(void *context);
+enum sn_ui_poll_result {
+    SN_UI_POLL_IDLE,
+    SN_UI_POLL_UPDATED,
+    SN_UI_POLL_STOPPED
+};
+
+typedef enum sn_ui_poll_result (*sn_ui_poll_callback)(void *context,
+							      const char **status);
 
 int sn_ui_run(struct sn_monitor *monitor,
-			  bool payload_logging_active,
-			  bool payload_inspection_active,
-			  sn_ui_poll_callback poll_capture,
-			  void *poll_context);
+		bool payload_logging_active,
+		bool payload_inspection_active,
+		sn_ui_poll_callback poll_capture,
+		void *poll_context);
 
 #endif

@@ -79,9 +79,15 @@ static void drain_monitor_events(struct sn_monitor *monitor)
     }
 }
 
-static const char *poll_live_capture(void *context)
+static enum sn_ui_poll_result poll_live_capture(void *context,
+                                                const char **status)
 {
     struct live_context *live = context;
+    bool updated = false;
+
+    if (status != NULL) {
+        *status = NULL;
+    }
 
     for (unsigned int index = 0U; index < 64U; ++index) {
         struct sn_capture_packet packet;
@@ -89,26 +95,33 @@ static const char *poll_live_capture(void *context)
             live->capture, &packet, live->error, sizeof(live->error));
 
         if (result == SN_CAPTURE_TIMEOUT) {
-            return NULL;
+            return updated ? SN_UI_POLL_UPDATED : SN_UI_POLL_IDLE;
         }
         if (result != SN_CAPTURE_PACKET) {
             char message[sizeof(live->error)];
             (void)snprintf(message, sizeof(message), "Capture stopped: %.200s",
                            live->error[0] != '\0' ? live->error : "unknown libpcap error");
             (void)snprintf(live->error, sizeof(live->error), "%s", message);
-            return live->error;
+            if (status != NULL) {
+                *status = live->error;
+            }
+            return SN_UI_POLL_STOPPED;
         }
 
         (void)sn_monitor_process(live->monitor, &packet);
         drain_monitor_events(live->monitor);
+        updated = true;
         if (live->payload_log != NULL &&
             !sn_payload_log_write_packet(live->payload_log, &packet)) {
             (void)snprintf(live->error, sizeof(live->error),
                            "Capture stopped: payload log write failed");
-            return live->error;
+            if (status != NULL) {
+                *status = live->error;
+            }
+            return SN_UI_POLL_STOPPED;
         }
     }
-    return NULL;
+    return updated ? SN_UI_POLL_UPDATED : SN_UI_POLL_IDLE;
 }
 
 static bool acknowledge_payload_logging(void)
