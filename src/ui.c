@@ -112,6 +112,7 @@ static void draw_screen(struct sn_monitor *monitor,
                         const struct sn_flow **flows,
                         size_t flow_count,
                         size_t selected,
+                        size_t scroll_start,
                         bool show_stats,
                         bool payload_logging_active,
                         const char *capture_status,
@@ -135,19 +136,23 @@ static void draw_screen(struct sn_monitor *monitor,
     mvhline(2, 0, ACS_HLINE, COLS);
 
     visible_rows = (size_t)(LINES - (show_stats ? 14 : 5));
-    if (visible_rows > flow_count) {
-        visible_rows = flow_count;
+    if (scroll_start > flow_count) {
+        scroll_start = flow_count;
+    }
+    if (visible_rows > flow_count - scroll_start) {
+        visible_rows = flow_count - scroll_start;
     }
     for (size_t row = 0U; row < visible_rows; ++row) {
         char endpoint_a[INET_ADDRSTRLEN] = "?";
         char endpoint_b[INET_ADDRSTRLEN] = "?";
-        const struct sn_flow *flow = flows[row];
+        size_t flow_index = scroll_start + row;
+        const struct sn_flow *flow = flows[flow_index];
 
         (void)inet_ntop(AF_INET, flow->endpoints[0].ipv4,
                         endpoint_a, sizeof(endpoint_a));
         (void)inet_ntop(AF_INET, flow->endpoints[1].ipv4,
                         endpoint_b, sizeof(endpoint_b));
-        if (row == selected) {
+        if (flow_index == selected) {
             attron(A_REVERSE);
         }
         mvprintw((int)row + 3, 0, "%-5s %-15s:%-5u -> %-15s:%-5u %8llu/%-8llu",
@@ -157,7 +162,7 @@ static void draw_screen(struct sn_monitor *monitor,
                  (unsigned long long)flow->packets[0],
                  (unsigned long long)flow->packets[1]);
         clrtoeol();
-        if (row == selected) {
+        if (flow_index == selected) {
             attroff(A_REVERSE);
         }
     }
@@ -303,6 +308,7 @@ int sn_ui_run(struct sn_monitor *monitor,
     struct ui_filter filter = {0};
     const struct sn_flow *flows[SN_FLOW_TABLE_CAPACITY];
     size_t selected = 0U;
+    size_t scroll_start = 0U;
     bool show_stats = false;
     bool capture_polling = poll_capture != NULL;
     const char *capture_status = NULL;
@@ -338,7 +344,11 @@ int sn_ui_run(struct sn_monitor *monitor,
         if (selected >= flow_count && flow_count > 0U) {
             selected = flow_count - 1U;
         }
-        draw_screen(monitor, &filter, flows, flow_count, selected, show_stats,
+        size_t visible_rows = LINES > (show_stats ? 14 : 5) ?
+            (size_t)(LINES - (show_stats ? 14 : 5)) : 1U;
+        scroll_start = sn_ui_window_start(flow_count, selected,
+                                          visible_rows, scroll_start);
+        draw_screen(monitor, &filter, flows, flow_count, selected, scroll_start, show_stats,
                 payload_logging_active, capture_status,
                 rates_ready ? &rates : (capture_polling ? &rates : NULL));
         key = getch();
@@ -371,6 +381,7 @@ int sn_ui_run(struct sn_monitor *monitor,
             rates = (struct sn_monitor_rates){0};
             rates_ready = false;
             selected = 0U;
+            scroll_start = 0U;
             break;
         case '\n':
         case KEY_ENTER:
@@ -383,26 +394,31 @@ int sn_ui_run(struct sn_monitor *monitor,
             set_ip_filter("Source host (IPv4 or all): ",
                           &filter.source_ip_enabled, filter.source_ip);
             selected = 0U;
+            scroll_start = 0U;
             break;
         case '2':
         case KEY_F(2):
             set_ip_filter("Destination host (IPv4 or all): ",
                           &filter.destination_ip_enabled, filter.destination_ip);
             selected = 0U;
+            scroll_start = 0U;
             break;
         case '3':
         case KEY_F(3):
             set_port_filter("Source port (0 for all): ",
                             &filter.source_port_enabled, &filter.source_port);
             selected = 0U;
+            scroll_start = 0U;
             break;
         case '4':
         case KEY_F(4):
             set_port_filter("Destination port (0 for all): ",
                             &filter.destination_port_enabled, &filter.destination_port);
             selected = 0U;
+            scroll_start = 0U;
             break;
         case KEY_RESIZE:
+            (void)resize_term(0, 0);
             break;
         default:
             break;

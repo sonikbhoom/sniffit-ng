@@ -6,7 +6,7 @@ This checklist records documented legacy behavior and the intended Sniffit NG di
 | --- | --- | --- |
 | `-i` curses live monitor | Preserve the connection-list-first workflow and familiar keyboard navigation. | Initial offline/live viewer implemented; additional parity interactions remain |
 | `-I` extended connection descriptions | Preserve useful protocol/port descriptions with bounded, sanitized text. | Planned |
-| Arrow keys / `j` / `k` selection | Preserve. | Implemented in offline viewer |
+| Arrow keys / `j` / `k` selection | Preserve. | Implemented with scroll-window handling and resize clamping; window helper unit-tested |
 | F1/F2 or `1`/`2` source/destination host masks | Preserve with validated IPv4 input and clear reset state. | Implemented in offline viewer |
 | F3/F4 or `3`/`4` source/destination port masks | Preserve with strict numeric range validation. | Implemented in offline viewer |
 | Enter to inspect/log a selected connection | Preserve connection details; persistent payload recording requires the approved runtime switch and acknowledgment. | Flow details implemented; acknowledged hex payload logging implemented for offline replay |

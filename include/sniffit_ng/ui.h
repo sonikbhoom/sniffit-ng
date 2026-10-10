@@ -2,6 +2,7 @@
 #define SNIFFIT_NG_UI_H
 
 #include "sniffit_ng/monitor.h"
+#include "sniffit_ng/ui_window.h"
 
 #include <stdbool.h>
 

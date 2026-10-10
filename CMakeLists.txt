@@ -37,6 +37,7 @@ target_include_directories(sniffit_privilege PUBLIC include)
 
 add_library(sniffit_ui STATIC src/ui.c)
 target_include_directories(sniffit_ui PUBLIC include)
+target_sources(sniffit_ui PRIVATE src/ui_window.c)
 target_link_libraries(sniffit_ui PUBLIC sniffit_monitor PkgConfig::NCURSESW)
 
 add_executable(sniffit-ng src/main.c)
@@ -156,10 +157,19 @@ if(BUILD_TESTING)
 
     add_test(NAME cli_help COMMAND sniffit-ng --help)
     add_test(NAME cli_version COMMAND sniffit-ng --version)
+
+    add_executable(test_ui_window tests/test_ui_window.c src/ui_window.c)
+    target_include_directories(test_ui_window PRIVATE include)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(test_ui_window PRIVATE
+            -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+        )
+    endif()
+    add_test(NAME ui_window COMMAND test_ui_window)
 endif()
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND SNIFFIT_NG_ENABLE_SANITIZERS)
-    foreach(target sniffit_packet sniffit_flow sniffit_capture sniffit_monitor sniffit_payload_log sniffit_privilege sniffit_ui sniffit-ng)
+    foreach(target sniffit_packet sniffit_flow sniffit_capture sniffit_monitor sniffit_payload_log sniffit_privilege sniffit_ui sniffit-ng test_ui_window)
         target_compile_options(${target} PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
         target_link_options(${target} PUBLIC -fsanitize=address,undefined)
     endforeach()
