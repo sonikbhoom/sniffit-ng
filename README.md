@@ -1,12 +1,26 @@
 # Sniffit NG
 
-Sniffit NG is a security-focused C successor to the legacy Sniffit monitor, developed in a separate source tree. It currently supports bounded Ethernet and Linux cooked v1 (SLL) IPv4 parsing, offline pcap replay, privilege-reduced live capture, flow summaries, and an ncurses monitor.
+Sniffit NG is a security-focused C successor to the legacy Sniffit monitor, developed in a separate source tree. It supports bounded Ethernet and Linux cooked v1 (SLL) IPv4 parsing, offline pcap replay, privilege-reduced live capture, bidirectional flow summaries, and an ncurses monitor. Other libpcap link types are rejected unless explicitly implemented and tested.
 
 This repository currently has no license. Public visibility does not itself grant permission to reuse, modify, or redistribute the code.
 
-In the live curses view, select a flow and press Enter to open its inspection pane on the right while leaving the flow list visible on the left. The pane appends bounded metadata records for TCP, generic UDP, ICMP, IGMP, VRRP, and SNMP over UDP. SNMP community strings and varbind values are never displayed. The header includes fixed service hints for common TCP/UDP ports; it does not derive labels from packet contents. ICMP Echo payload samples remain separately gated by the acknowledged inspection setting. The pane stays stable rather than repainting on idle polls; arrow keys or `j`/`k` switch the inspected flow, and other keys close the pane.
+## Monitor and Protocol Decoding
 
-Flow masks affect which connections are shown, not which packets are captured or counted. Source and destination host/port masks are optional and combine as endpoint pairs; because each flow is bidirectional, either traffic direction can satisfy the pair. Setting a host mask to `all` or a port mask to `0` clears that individual mask.
+In the live curses view, select a flow and press Enter to open the inspection pane on the right. The flow list remains visible on the left (about 40% of the terminal); the detail pane uses the remaining width. New records append to a bounded scrolling history instead of replacing the pane. Use arrow keys or `j`/`k` to switch the inspected flow without closing it; other keys close the pane.
+
+Packet decoding is protocol-wide, not limited to ICMP. Active metadata summaries currently include TCP, packet-local HTTP/1.x on common cleartext ports (80, 8000, 8080), generic UDP, NTP-over-UDP, SNMP-over-UDP, ICMP, IGMP, and VRRP. Each flow retains at most 16 recent metadata records. Fixed service hints are derived only from protocol and port, never packet content.
+
+HTTP summaries include request method and a validated Host, or response status plus allowlisted Server, Content-Type, and numeric Content-Length fields. Paths, query strings, cookies, Set-Cookie, authorization headers, and bodies are omitted. TCP stream reassembly is not implemented, so HTTP fields split across packets may not be recognized. HTTPS is not decoded as plaintext HTTP.
+
+NTP summaries include version, mode, leap indicator, stratum, poll/precision, and a hexadecimal reference ID; NTP timestamps are omitted. SNMP summaries include version, PDU type, request ID, and varbind count; community strings and varbind values are never displayed.
+
+**Planned modules:** Source files also exist for DNS, DHCPv4/BOOTP, TLS, QUIC, RTP/RTCP, Syslog, RADIUS/TACACS+, ICMPv6/Neighbor Discovery, DHCPv6, OSPFv3/RIPng, ARP, LLDP/CDP, STP/RSTP, LACP, BGP, OSPFv2, IS-IS, RIP, HSRP/GLBP, MPLS, GRE, IP-in-IP, VXLAN, and Geneve. These are inert placeholders, not plugins or supported decoders: they are compiled but are not connected to the dispatcher and always report “not decoded.” They require their listed parser prerequisites and tests before activation.
+
+HTTP analysts can supply an optional compile-time metadata extension source with `-DSNIFFIT_NG_CUSTOM_HTTP_DECODER_SOURCE=/path/to/http_extension.c`. Implement `sn_http_decode_extension` as declared in [`include/sniffit_ng/http_decode_extension.h`](include/sniffit_ng/http_decode_extension.h). The hook receives one bounded TCP payload span and may add a short printable summary. Its default implementation is inert. This is a trusted source-code customization point, not a runtime full-disclosure switch or a built-in raw dump.
+
+ICMP Echo payload samples are a separate, opt-in feature controlled by the acknowledged inspection setting below. Other protocol payload contents are not retained by built-in decoders.
+
+Flow masks affect which connections are shown, not which packets are captured or counted. Source and destination host/port masks are optional and combine as endpoint pairs; because each flow is bidirectional, either traffic direction can satisfy the pair. Setting a host mask to `all` or a port mask to `0` clears that individual mask. Flows are listed deterministically by protocol and endpoints.
 
 ## Build and test
 
@@ -21,7 +35,7 @@ ctest --test-dir build --output-on-failure
 sudo ./build/sniffit-ng --interface lo
 ```
 
-The viewer supports offline Ethernet pcap replay and live capture with `--interface DEVICE`. Live mode defaults to non-promiscuous capture; `--promiscuous` must be explicitly requested. On Linux, install a protected, root-owned copy with `CAP_NET_RAW` in its permitted set to avoid running the full application through `sudo`:
+The viewer supports offline pcap replay and live capture with `--interface DEVICE` on Ethernet and Linux cooked v1 (SLL) links. Live mode defaults to non-promiscuous capture; `--promiscuous` must be explicitly requested. On Linux, install a protected, root-owned copy with `CAP_NET_RAW` in its permitted set to avoid running the full application through `sudo`:
 
 ```sh
 sudo setcap cap_net_raw+p /usr/local/bin/sniffit-ng
@@ -31,11 +45,11 @@ getcap /usr/local/bin/sniffit-ng
 
 The application makes only `CAP_NET_RAW` effective while opening pcap, then clears capabilities and sets `no_new_privs` before parsing packets, writing logs, or entering curses. A sudo invocation from a regular user is also supported when `SUDO_UID` and `SUDO_GID` are available. Do not set file capabilities on a developer-writable build artifact: any user able to execute that binary can capture traffic available to the process. Promiscuous mode may require additional privilege and is not granted by `CAP_NET_RAW` alone. The parser borrows pointers into the caller's capture buffer; those views are valid only until the next read from the source.
 
-Payload persistence is disabled by default. To enable it for one offline replay, run `./build/sniffit-ng --read-pcap capture.pcap --payload-logging`; the program requires an interactive acknowledgment before opening the capture. It creates `sniffit-ng-payload.log` exclusively with owner-only permissions and writes validated payload bytes as hex. Use `--payload-log PATH` with `--payload-logging` to choose another new path; existing files and symlinks are not followed. Review the warning, confirm authorization and consent, protect the output, and delete it according to your retention policy. Without a controlling terminal, logging fails closed.
+Persistent payload logging is disabled by default. To enable it for one offline replay, run `./build/sniffit-ng --read-pcap capture.pcap --payload-logging`; the program requires an interactive acknowledgment before opening the capture. It creates `sniffit-ng-payload.log` exclusively with owner-only permissions and writes validated payload bytes as hex. Use `--payload-log PATH` with `--payload-logging` to choose another new path; existing files and symlinks are not followed. Review the warning, confirm authorization and consent, protect the output, and delete it according to your retention policy. Without a controlling terminal, logging fails closed.
 
-## ICMP Payload Inspection
+## ICMP Echo Payload Inspection
 
-Flow summaries and packet counters work without payload inspection. `--inspect-payloads` enables the Enter detail view to display sanitized ICMP Echo payload records. At most 16 recent records per flow are kept in memory, each with at most 64 payload bytes; new records append to the open scrolling pane. This feature does not write payload bytes to disk. To avoid repeating the ethical acknowledgment, place this exact active comment in the config file:
+Flow summaries and protocol metadata work without payload inspection. `--inspect-payloads` enables the Enter detail view to display sanitized ICMP Echo payload records. At most 16 recent records per flow are kept in memory, each with at most 64 payload bytes; new records append to the open scrolling pane. This feature does not write payload bytes to disk. To avoid repeating the ethical acknowledgment, place this exact active comment in the config file:
 
 ```ini
 inspect_payloads = true
