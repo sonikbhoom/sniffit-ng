@@ -2,6 +2,8 @@
 
 Sniffit NG is a security-focused C successor to the legacy Sniffit monitor. It is being developed separately from the original source tree.
 
+This repository currently has no license. Public visibility does not itself grant permission to reuse, modify, or redistribute the code.
+
 The initial slice is a non-privileged Ethernet/IPv4 parser with bounded views and unit tests. Live capture, ncurses UI, configuration, and output handling will be added in later stages described in [PLAN.md](PLAN.md).
 
 ## Build and test
