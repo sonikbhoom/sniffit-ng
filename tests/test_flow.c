@@ -148,6 +148,54 @@ static void test_counters_saturate(void)
     assert(table.entries[0].bytes[0] == UINT64_MAX);
 }
 
+static void test_icmp_payload_requires_opt_in_and_is_bounded(void)
+{
+    struct sn_flow_table table;
+    struct sn_packet_view packet = {0};
+    const struct sn_flow *flow = NULL;
+    uint8_t icmp_header[8] = {8U, 0U, 0U, 0U, 0x12U, 0x34U, 0U, 7U};
+    uint8_t payload[SN_FLOW_ICMP_SAMPLE_CAPACITY + 12U];
+
+    for (size_t index = 0U; index < sizeof(payload); ++index) {
+        payload[index] = (uint8_t)('A' + (index % 26U));
+    }
+    packet.protocol = 1U;
+    packet.icmp_type = 8U;
+    packet.icmp_identifier = 0x1234U;
+    packet.icmp_sequence = 7U;
+    packet.ipv4_total_length = 20U + sizeof(icmp_header) + sizeof(payload);
+    packet.source_ipv4[0] = 192U;
+    packet.source_ipv4[3] = 1U;
+    packet.destination_ipv4[0] = 192U;
+    packet.destination_ipv4[3] = 2U;
+    packet.transport = icmp_header;
+    packet.transport_length = sizeof(icmp_header) + sizeof(payload);
+    packet.transport_header_present = true;
+    packet.payload = payload;
+    packet.payload_length = sizeof(payload);
+
+    sn_flow_table_init(&table, 100U);
+    assert(sn_flow_table_update(&table, &packet, 1U, &flow) == SN_FLOW_CREATED);
+    assert(flow != NULL && !flow->has_icmp_echo_sample);
+
+    sn_flow_table_set_payload_inspection(&table, true);
+    assert(sn_flow_table_update(&table, &packet, 2U, &flow) == SN_FLOW_UPDATED);
+    assert(flow->has_icmp_echo_sample);
+    assert(flow->icmp_type == 8U);
+    assert(flow->icmp_identifier == 0x1234U);
+    assert(flow->icmp_sequence == 7U);
+    assert(flow->icmp_payload_sample_length == SN_FLOW_ICMP_SAMPLE_CAPACITY);
+    assert(memcmp(flow->icmp_payload_sample, payload,
+                  SN_FLOW_ICMP_SAMPLE_CAPACITY) == 0);
+
+    sn_flow_table_set_payload_inspection(&table, false);
+    assert(!flow->has_icmp_echo_sample);
+    assert(flow->icmp_payload_sample_length == 0U);
+    for (size_t index = 0U; index < sizeof(flow->icmp_payload_sample); ++index) {
+        assert(flow->icmp_payload_sample[index] == 0U);
+    }
+}
+
 int main(void)
 {
     test_reverse_packets_update_one_flow();
@@ -156,6 +204,7 @@ int main(void)
     test_capacity_evicts_oldest_flow();
     test_time_must_be_monotonic_per_flow();
     test_counters_saturate();
+    test_icmp_payload_requires_opt_in_and_is_bounded();
     puts("flow tests passed");
     return 0;
 }

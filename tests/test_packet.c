@@ -118,6 +118,33 @@ static void test_valid_udp(void)
     assert(view.payload_length == 3U);
 }
 
+static void test_icmp_echo_metadata_and_payload_boundary(void)
+{
+    uint8_t frame[FRAME_CAPACITY];
+    struct sn_packet_view view;
+    size_t frame_length = make_ipv4_frame(frame, 1U, 13U);
+    uint8_t *icmp = frame + ETHERNET_HEADER_LENGTH + IPV4_HEADER_LENGTH;
+
+    icmp[0] = 8U;
+    icmp[1] = 0U;
+    write_be16(icmp + 4U, 0x1234U);
+    write_be16(icmp + 6U, 7U);
+    memcpy(icmp + 8U, "hello", 5U);
+
+    assert(sn_packet_parse_ethernet_ipv4(frame, frame_length, &view) == SN_PACKET_OK);
+    assert(view.icmp_type == 8U);
+    assert(view.icmp_code == 0U);
+    assert(view.icmp_identifier == 0x1234U);
+    assert(view.icmp_sequence == 7U);
+    assert(view.payload_length == 5U);
+    assert(memcmp(view.payload, "hello", 5U) == 0);
+
+    frame_length = make_ipv4_frame(frame, 1U, 7U);
+    icmp = frame + ETHERNET_HEADER_LENGTH + IPV4_HEADER_LENGTH;
+    icmp[0] = 0U;
+    assert(sn_packet_parse_ethernet_ipv4(frame, frame_length, &view) == SN_PACKET_MALFORMED);
+}
+
 static void test_malformed_transport_headers(void)
 {
     uint8_t frame[FRAME_CAPACITY];
@@ -182,6 +209,7 @@ int main(void)
     test_truncated_frames();
     test_malformed_ipv4_headers();
     test_valid_udp();
+    test_icmp_echo_metadata_and_payload_boundary();
     test_malformed_transport_headers();
     test_fragment_and_vlan();
     test_unsupported_and_invalid_arguments();

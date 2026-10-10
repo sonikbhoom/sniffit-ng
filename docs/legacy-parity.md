@@ -9,7 +9,7 @@ This checklist records documented legacy behavior and the intended Sniffit NG di
 | Arrow keys / `j` / `k` selection | Preserve. | Implemented with scroll-window handling and resize clamping; window helper unit-tested |
 | F1/F2 or `1`/`2` source/destination host masks | Preserve with validated IPv4 input and clear reset state. | Implemented in offline viewer |
 | F3/F4 or `3`/`4` source/destination port masks | Preserve with strict numeric range validation. | Implemented in offline viewer |
-| Enter to inspect/log a selected connection | Preserve connection details; persistent payload recording requires the approved runtime switch and acknowledgment. | Flow details implemented; acknowledged hex payload logging implemented for offline replay |
+| Enter to inspect/log a selected connection | Preserve flow details. Bounded ICMP Echo payload display is in-memory and config-acknowledged; persistent payload recording is a separate per-run acknowledged option. | ICMP Echo request/reply ID, sequence, and sanitized 64-byte sample implemented; config acknowledgment and opt-out behavior tested |
 | `n` packet-rate panel sampled every three seconds | Preserve, including IP/TCP/ICMP/UDP counters, with timer updates on the UI event loop. | Three-second live packet/byte sampler implemented, unit-tested, and visually confirmed by the user |
 | `r` reset and `q` quit/stop logging | Preserve with predictable state transitions and graceful shutdown. | Reset and quit implemented; logging state pending |
 | Live capture and interface selection | Preserve; determine link type from capture metadata and validate supported framing. | Capture/privilege implementation and post-drop loopback probe passed; user confirmed live curses rendering |
@@ -21,6 +21,7 @@ This checklist records documented legacy behavior and the intended Sniffit NG di
 | F5-F8 execute current-directory helper programs | Do not preserve implicit arbitrary execution. Consider a documented, configured, allowlisted action interface only if required. | Deliberate change |
 | `g` packet generation | Keep disabled by default; if retained, require a separate runtime option and explicit authorization acknowledgment. | Planned, gated |
 | Legacy config syntax | Support a validated migration subset; reject malformed input instead of silently continuing or overrunning buffers. | Planned |
+| Sniffit NG config | Store opt-in payload inspection and its ethical acknowledgment comment; reject malformed/unknown options. | Implemented for `inspect_payloads` with exact `##` acknowledgment marker |
 | Legacy interface-wide root execution | Replace with least-privilege capture setup and privilege drop before packet processing/UI work. | Deliberate change |
 
 ## Initial Keys

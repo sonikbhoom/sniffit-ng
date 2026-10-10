@@ -159,8 +159,20 @@ enum sn_packet_result sn_packet_parse_ethernet_ipv4(
         if (ip_payload_length < ICMP_MIN_HEADER_LENGTH) {
             return SN_PACKET_MALFORMED;
         }
-        view->payload = view->transport + ICMP_MIN_HEADER_LENGTH;
-        view->payload_length = ip_payload_length - ICMP_MIN_HEADER_LENGTH;
+        view->icmp_type = view->transport[0];
+        view->icmp_code = view->transport[1];
+        if (view->icmp_type == 0U || view->icmp_type == 8U) {
+            if (ip_payload_length < 8U) {
+                return SN_PACKET_MALFORMED;
+            }
+            view->icmp_identifier = read_be16(view->transport + 4U);
+            view->icmp_sequence = read_be16(view->transport + 6U);
+            view->payload = view->transport + 8U;
+            view->payload_length = ip_payload_length - 8U;
+        } else {
+            view->payload = view->transport + ICMP_MIN_HEADER_LENGTH;
+            view->payload_length = ip_payload_length - ICMP_MIN_HEADER_LENGTH;
+        }
         view->transport_header_present = true;
         return SN_PACKET_OK;
     default:

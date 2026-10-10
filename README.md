@@ -1,10 +1,8 @@
 # Sniffit NG
 
-Sniffit NG is a security-focused C successor to the legacy Sniffit monitor. It is being developed separately from the original source tree.
+Sniffit NG is a security-focused C successor to the legacy Sniffit monitor, developed in a separate source tree. It currently supports bounded Ethernet/IPv4 parsing, offline pcap replay, privilege-reduced live capture, flow summaries, and an ncurses monitor.
 
 This repository currently has no license. Public visibility does not itself grant permission to reuse, modify, or redistribute the code.
-
-The initial slice is a non-privileged Ethernet/IPv4 parser with bounded views and unit tests. Live capture, ncurses UI, configuration, and output handling will be added in later stages described in [PLAN.md](PLAN.md).
 
 ## Build and test
 
@@ -30,3 +28,16 @@ getcap /usr/local/bin/sniffit-ng
 The application makes only `CAP_NET_RAW` effective while opening pcap, then clears capabilities and sets `no_new_privs` before parsing packets, writing logs, or entering curses. A sudo invocation from a regular user is also supported when `SUDO_UID` and `SUDO_GID` are available. Do not set file capabilities on a developer-writable build artifact: any user able to execute that binary can capture traffic available to the process. Promiscuous mode may require additional privilege and is not granted by `CAP_NET_RAW` alone. The parser borrows pointers into the caller's capture buffer; those views are valid only until the next read from the source.
 
 Payload persistence is disabled by default. To enable it for one offline replay, run `./build/sniffit-ng --read-pcap capture.pcap --payload-logging`; the program requires an interactive acknowledgment before opening the capture. It creates `sniffit-ng-payload.log` exclusively with owner-only permissions and writes validated payload bytes as hex. Use `--payload-log PATH` with `--payload-logging` to choose another new path; existing files and symlinks are not followed. Review the warning, confirm authorization and consent, protect the output, and delete it according to your retention policy. Without a controlling terminal, logging fails closed.
+
+## ICMP Payload Inspection
+
+Flow summaries and packet counters work without payload inspection. `--inspect-payloads` enables the Enter detail view to display a sanitized ICMP Echo payload sample. At most the latest 64 bytes per flow are retained in memory; this feature does not write payload bytes to disk. To avoid repeating the ethical acknowledgment, place this exact active comment in the config file:
+
+```ini
+inspect_payloads = true
+## User has acknowledged to behave ethically and inspect only authorized traffic.
+```
+
+By default, the config is read from `$XDG_CONFIG_HOME/sniffit-ng/config`, or `~/.config/sniffit-ng/config` when `XDG_CONFIG_HOME` is unset. Pass `--config FILE` to use another file. The `--inspect-payloads` switch can enable inspection for one run, but an acknowledgment in the loaded config is still required. If inspection is enabled in config, it is active for that run without the switch. The program prints a reminder that inspection must be authorized and handled ethically. Missing acknowledgment fails closed. The shipped [`sniffit-ng.conf.example`](sniffit-ng.conf.example) keeps inspection disabled and its acknowledgment line commented out.
+
+This persisted acknowledgment applies only to in-memory ICMP Echo display. Persistent payload logging remains a separate feature and still requires the interactive per-run acknowledgment described above.

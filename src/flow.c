@@ -98,6 +98,22 @@ void sn_flow_table_init(struct sn_flow_table *table, uint64_t idle_timeout_ns)
         SN_FLOW_DEFAULT_IDLE_TIMEOUT_NS : idle_timeout_ns;
 }
 
+void sn_flow_table_set_payload_inspection(struct sn_flow_table *table, bool enabled)
+{
+    if (table == NULL) {
+        return;
+    }
+    table->inspect_payloads = enabled;
+    if (!enabled) {
+        for (size_t index = 0U; index < SN_FLOW_TABLE_CAPACITY; ++index) {
+            struct sn_flow *flow = &table->entries[index];
+            flow->has_icmp_echo_sample = false;
+            flow->icmp_payload_sample_length = 0U;
+            memset(flow->icmp_payload_sample, 0, sizeof(flow->icmp_payload_sample));
+        }
+    }
+}
+
 enum sn_flow_update_result sn_flow_table_update(
     struct sn_flow_table *table,
     const struct sn_packet_view *packet,
@@ -163,6 +179,22 @@ enum sn_flow_update_result sn_flow_table_update(
     increment_saturated(&slot->packets[key.direction], 1U);
     increment_saturated(&slot->bytes[key.direction], packet->ipv4_total_length);
     slot->last_seen_ns = timestamp_ns;
+    if (table->inspect_payloads && packet->protocol == 1U &&
+        (packet->icmp_type == 0U || packet->icmp_type == 8U)) {
+        size_t sample_length = packet->payload_length;
+
+        if (sample_length > SN_FLOW_ICMP_SAMPLE_CAPACITY) {
+            sample_length = SN_FLOW_ICMP_SAMPLE_CAPACITY;
+        }
+        slot->has_icmp_echo_sample = true;
+        slot->icmp_type = packet->icmp_type;
+        slot->icmp_identifier = packet->icmp_identifier;
+        slot->icmp_sequence = packet->icmp_sequence;
+        slot->icmp_payload_sample_length = sample_length;
+        if (sample_length > 0U && packet->payload != NULL) {
+            memcpy(slot->icmp_payload_sample, packet->payload, sample_length);
+        }
+    }
 
     if (flow_out != NULL) {
         *flow_out = slot;

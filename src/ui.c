@@ -1,6 +1,7 @@
 #include "sniffit_ng/ui.h"
 
 #include <arpa/inet.h>
+#include <ctype.h>
 #include <curses.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -115,6 +116,7 @@ static void draw_screen(struct sn_monitor *monitor,
                         size_t scroll_start,
                         bool show_stats,
                         bool payload_logging_active,
+                        bool payload_inspection_active,
                         const char *capture_status,
                         const struct sn_monitor_rates *rates)
 {
@@ -129,8 +131,9 @@ static void draw_screen(struct sn_monitor *monitor,
     }
 
     attron(A_BOLD);
-    mvprintw(0, 0, "Sniffit NG | Ethernet / IPv4 monitor%s",
-             payload_logging_active ? " | PAYLOAD LOGGING ENABLED FOR THIS REPLAY" : "");
+    mvprintw(0, 0, "Sniffit NG | Ethernet / IPv4 monitor%s%s",
+             payload_logging_active ? " | PAYLOAD LOGGING ACTIVE" : "",
+             payload_inspection_active ? " | ICMP PAYLOAD DISPLAY ENABLED" : "");
     attroff(A_BOLD);
     mvprintw(1, 0, "PROTO  ENDPOINT A                         ENDPOINT B                         PACKETS A>B/B>A");
     mvhline(2, 0, ACS_HLINE, COLS);
@@ -266,10 +269,11 @@ static void set_port_filter(const char *prompt, bool *enabled, uint16_t *port)
     *enabled = value != 0UL;
 }
 
-static void show_details(const struct sn_flow *flow)
+static void show_details(const struct sn_flow *flow, bool payload_inspection_active)
 {
     char endpoint_a[INET_ADDRSTRLEN] = "?";
     char endpoint_b[INET_ADDRSTRLEN] = "?";
+    char payload_text[SN_FLOW_ICMP_SAMPLE_CAPACITY + 1U];
     int row = LINES / 2 - 3;
 
     (void)inet_ntop(AF_INET, flow->endpoints[0].ipv4,
@@ -287,6 +291,29 @@ static void show_details(const struct sn_flow *flow)
     mvprintw(row + 3, 3, "Bytes:   %llu / %llu",
              (unsigned long long)flow->bytes[0],
              (unsigned long long)flow->bytes[1]);
+    if (flow->protocol == 1U) {
+        if (flow->has_icmp_echo_sample) {
+            mvprintw(row + 5, 3, "ICMP Echo %s, id=%u, sequence=%u",
+                     flow->icmp_type == 8U ? "request" : "reply",
+                     flow->icmp_identifier, flow->icmp_sequence);
+            if (payload_inspection_active) {
+                for (size_t index = 0U; index < flow->icmp_payload_sample_length; ++index) {
+                    unsigned char byte = flow->icmp_payload_sample[index];
+                    payload_text[index] = isprint(byte) ? (char)byte : '.';
+                }
+                payload_text[flow->icmp_payload_sample_length] = '\0';
+                mvprintw(row + 6, 3, "Payload sample (%zu bytes):",
+                         flow->icmp_payload_sample_length);
+                mvaddnstr(row + 7, 3, payload_text,
+                          (int)flow->icmp_payload_sample_length);
+            }
+        } else if (payload_inspection_active) {
+            mvaddstr(row + 5, 3, "No ICMP Echo payload sample retained yet.");
+        } else {
+            mvaddstr(row + 5, 3,
+                     "Payload display is off; enable --inspect-payloads with an acknowledged config.");
+        }
+    }
     mvaddstr(LINES - 2, 3, "Press any key to return");
     refresh();
     (void)getch();
@@ -302,6 +329,7 @@ static void reset_monitor(struct sn_monitor *monitor)
 
 int sn_ui_run(struct sn_monitor *monitor,
               bool payload_logging_active,
+              bool payload_inspection_active,
               sn_ui_poll_callback poll_capture,
               void *poll_context)
 {
@@ -349,7 +377,7 @@ int sn_ui_run(struct sn_monitor *monitor,
         scroll_start = sn_ui_window_start(flow_count, selected,
                                           visible_rows, scroll_start);
         draw_screen(monitor, &filter, flows, flow_count, selected, scroll_start, show_stats,
-                payload_logging_active, capture_status,
+                payload_logging_active, payload_inspection_active, capture_status,
                 rates_ready ? &rates : (capture_polling ? &rates : NULL));
         key = getch();
         if (key == 'q' || key == 'Q') {
@@ -386,7 +414,7 @@ int sn_ui_run(struct sn_monitor *monitor,
         case '\n':
         case KEY_ENTER:
             if (flow_count > 0U) {
-                show_details(flows[selected]);
+                show_details(flows[selected], payload_inspection_active);
             }
             break;
         case '1':

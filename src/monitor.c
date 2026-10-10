@@ -73,6 +73,13 @@ void sn_monitor_init(struct sn_monitor *monitor, uint64_t idle_timeout_ns)
     sn_flow_table_init(&monitor->flows, idle_timeout_ns);
 }
 
+void sn_monitor_set_payload_inspection(struct sn_monitor *monitor, bool enabled)
+{
+    if (monitor != NULL) {
+        sn_flow_table_set_payload_inspection(&monitor->flows, enabled);
+    }
+}
+
 void sn_monitor_rate_sampler_init(struct sn_monitor_rate_sampler *sampler)
 {
     if (sampler != NULL) {

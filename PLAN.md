@@ -55,6 +55,8 @@ At each inspection checkpoint, report: deliverable completed, exact command/test
 
 Payload logging is off by default and will not be enabled by a config file or remembered preference. The run-time `--payload-logging` switch enables persistent payload capture only for that invocation; `--payload-log PATH` selects an alternate output path. When supplied, the program displays an ethics/privacy warning covering authorization, consent, data minimization, secure storage, and retention, then requires the operator to type exactly `I ACKNOWLEDGE THE PRIVACY AND AUTHORIZATION RISKS` on `/dev/tty` before capture starts. Declining or running without a controlling terminal fails closed; there is no silent or unattended acknowledgment bypass. The output file is created exclusively with mode `0600`, and existing files/symlinks are rejected. The UI visibly indicates when payload logging was enabled for the replay. Tests verify the exact acknowledgment, fail-closed behavior, permissions, no-overwrite policy, and hex-only payload encoding.
 
+ICMP Echo payload inspection is a distinct, in-memory-only feature. It is disabled by default and requires either `--inspect-payloads` or `inspect_payloads = true` in config, plus the exact active comment `## User has acknowledged to behave ethically and inspect only authorized traffic.` in the loaded config. This persisted marker avoids repeating a prompt but does not enable payload logging. When enabled, only the latest 64 bytes of ICMP Echo payload per flow are retained; other protocol payloads are not retained for the detail view. Printable text is sanitized before display. Disabling the setting clears retained sample bytes.
+
 Packet generation will also be off by default and separately gated by an explicit command-line option plus an acknowledgment before sending. No stealth, evasion, or third-party traffic testing is in scope.
 
 The user has explicitly authorized development and testing of live capture against self-generated loopback traffic. This authorization does not extend to unrelated hosts or networks; tests must send and inspect only their own localhost probes.
@@ -66,6 +68,7 @@ The user has explicitly authorized development and testing of live capture again
 - No curses operation runs in an asynchronous signal handler, and capture-to-UI communication is bounded.
 - Legacy interaction goals have a documented parity checklist; unsafe behavior is replaced with a deliberate and documented safer equivalent.
 - Payload persistence and packet generation remain disabled unless explicitly requested and acknowledged at runtime.
+- ICMP payload display defaults off, is bounded to in-memory Echo samples, and requires the recorded config acknowledgment; persistent logging remains separately gated.
 - The independent project builds and its non-privileged tests pass without touching the legacy tree.
 
 ## Milestone Checkpoint: 2026-10-10
@@ -74,13 +77,14 @@ The user has explicitly authorized development and testing of live capture again
 - The isolated `sniffit-ng` project has a safe Ethernet/IPv4 parser, bounded TCP/UDP/ICMP flow state, offline and live libpcap sources, a bounded monitor event queue, an initial curses workflow, and fail-closed acknowledged payload logging.
 - The non-sanitized `cap_net_raw+p` loopback test passed after privilege drop. The user confirmed the live curses screen and three-second rate display. The sanitizer suite passes; its live test is intentionally skipped when run without `CAP_NET_RAW`.
 - Authorized LAN ping: `razorback` resolved to `192.168.1.6`; eight ICMP echoes sent via `enp0s31f6` succeeded with 0% loss while the live monitor was running, and the user confirmed the GUI check worked. No broader LAN scan was performed.
-- Published Git milestone: public repository `sonikbhoom/sniffit-ng`, branch `main`; latest verified remote commit at this checkpoint is `31e302c`. The source milestone and publication-policy notes are pushed. The repository currently has no license, by user choice.
+- ICMP detail MVP: Enter now shows ICMP Echo request/reply type, identifier, sequence, and sanitized payload text when the config-backed inspection acknowledgment is active. Samples are limited to 64 bytes per flow and cleared when inspection is disabled.
+- Published Git milestone: public repository `sonikbhoom/sniffit-ng`, branch `main`; local work is pushed. The repository currently has no license, by user choice.
 
 ## Remaining Refactor Work
 
 1. **LAN ping display:** Verified against authorized host `razorback` (`192.168.1.6`) with eight successful pings and live GUI confirmation. No broader LAN scan was performed.
 2. **Complete UI parity:** Scrolling and resize clamping are implemented with a pure helper test. Remaining: `-I`-style extended descriptions, deterministic flow ordering, and more detailed filter semantics. The initial list/details/mask/statistics/reset/quit workflow exists but is not full legacy parity.
-3. **Configuration and compatibility:** Add a bounded config parser and explicitly mapped legacy CLI options; preserve only validated semantics.
+3. **Configuration and compatibility:** The bounded `inspect_payloads` config and exact ethics-marker validation are implemented. Remaining: add an explicitly mapped legacy CLI/config subset; preserve only validated semantics.
 4. **Output modes:** Add safe pcap recording and selected summary/dump modes. Keep cleartext payload output disabled unless the runtime acknowledgment policy is satisfied.
 5. **Hardening:** Add parser fuzz targets, broader malformed-pcap corpus, pseudo-terminal curses interaction tests, and privilege/capability tests across supported Linux environments. Decide and document behavior for non-Ethernet link types.
 6. **CPack packaging:** Add CPack configuration for RPM and DEB packages with explicit package metadata, runtime dependencies, install paths, and clean uninstall behavior. Validate package contents and install/remove in disposable environments; build both formats in CI where the required host tooling is available. Packages must not carry `CAP_NET_RAW` file capabilities; document post-install capability setup separately and warn that capabilities on user-writable binaries are unsafe.

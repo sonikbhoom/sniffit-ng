@@ -1,19 +1,67 @@
 #include "sniffit_ng/capture.h"
+#include "sniffit_ng/config.h"
 #include "sniffit_ng/monitor.h"
 #include "sniffit_ng/payload_log.h"
 #include "sniffit_ng/privilege.h"
 #include "sniffit_ng/ui.h"
 
 #include <stdbool.h>
+#include <errno.h>
+#include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 static void print_usage(FILE *stream, const char *program)
 {
-    fprintf(stream, "Usage: %s --read-pcap FILE [--payload-logging [--payload-log FILE]]\n", program);
-    fprintf(stream, "       %s --interface DEVICE [--promiscuous] [--payload-logging [--payload-log FILE]]\n", program);
+    fprintf(stream, "Usage: %s --read-pcap FILE [--config FILE] [--inspect-payloads]\n", program);
+    fprintf(stream, "       %s --interface DEVICE [--promiscuous] [--config FILE] [--inspect-payloads]\n", program);
+    fprintf(stream, "       %s [--read-pcap FILE|--interface DEVICE] --payload-logging [--payload-log FILE]\n", program);
     fprintf(stream, "       %s --help | --version\n", program);
+}
+
+static bool load_application_config(const char *requested_path,
+                                    struct sn_app_config *config,
+                                    char *error,
+                                    size_t error_capacity)
+{
+    char default_path[PATH_MAX];
+    const char *config_path = requested_path;
+    const char *base;
+
+    sn_config_init(config);
+    if (config_path == NULL) {
+        base = getenv("XDG_CONFIG_HOME");
+        if (base != NULL && base[0] != '\0') {
+            if (snprintf(default_path, sizeof(default_path),
+                         "%s/sniffit-ng/config", base) >= (int)sizeof(default_path)) {
+                (void)snprintf(error, error_capacity, "default config path is too long");
+                return false;
+            }
+        } else {
+            base = getenv("HOME");
+            if (base == NULL || base[0] == '\0') {
+                return true;
+            }
+            if (snprintf(default_path, sizeof(default_path),
+                         "%s/.config/sniffit-ng/config", base) >= (int)sizeof(default_path)) {
+                (void)snprintf(error, error_capacity, "default config path is too long");
+                return false;
+            }
+        }
+        config_path = default_path;
+        if (access(config_path, F_OK) != 0) {
+            if (errno == ENOENT) {
+                return true;
+            }
+            (void)snprintf(error, error_capacity, "cannot access default config: %s",
+                           strerror(errno));
+            return false;
+        }
+    }
+    return sn_config_load_file(config_path, config, error, error_capacity);
 }
 
 struct live_context {
@@ -82,6 +130,7 @@ static bool acknowledge_payload_logging(void)
 
 static int replay_pcap(const char *path,
                        bool payload_logging_enabled,
+                       bool payload_inspection_enabled,
                        const char *payload_log_path)
 {
     char error[256] = {0};
@@ -108,6 +157,7 @@ static int replay_pcap(const char *path,
     }
 
     sn_monitor_init(&monitor, SN_FLOW_DEFAULT_IDLE_TIMEOUT_NS);
+    sn_monitor_set_payload_inspection(&monitor, payload_inspection_enabled);
     while ((result = sn_capture_next(capture, &packet, error, sizeof(error))) != SN_CAPTURE_EOF) {
         if (result == SN_CAPTURE_TIMEOUT) {
             continue;
@@ -134,12 +184,14 @@ static int replay_pcap(const char *path,
     if (status != 0) {
         return status;
     }
-    return sn_ui_run(&monitor, payload_logging_enabled, NULL, NULL);
+    return sn_ui_run(&monitor, payload_logging_enabled, payload_inspection_enabled,
+                     NULL, NULL);
 }
 
 static int run_live_capture(const char *device,
                             bool promiscuous,
                             bool payload_logging_enabled,
+                            bool payload_inspection_enabled,
                             const char *payload_log_path)
 {
     char error[256] = {0};
@@ -183,11 +235,13 @@ static int run_live_capture(const char *device,
     }
 
     sn_monitor_init(&monitor, SN_FLOW_DEFAULT_IDLE_TIMEOUT_NS);
+    sn_monitor_set_payload_inspection(&monitor, payload_inspection_enabled);
     live.capture = capture;
     live.monitor = &monitor;
     live.payload_log = payload_log;
     live.error[0] = '\0';
     ui_result = sn_ui_run(&monitor, payload_logging_enabled,
+                          payload_inspection_enabled,
                           poll_live_capture, &live);
 
     sn_capture_close(capture);
@@ -203,8 +257,13 @@ int main(int argc, char **argv)
     const char *pcap_path = NULL;
     const char *interface_name = NULL;
     const char *payload_log_path = NULL;
+    const char *config_path = NULL;
     bool payload_logging_enabled = false;
+    bool payload_inspection_requested = false;
+    bool payload_inspection_enabled;
     bool promiscuous = false;
+    struct sn_app_config config;
+    char config_error[256] = {0};
 
     for (int index = 1; index < argc; ++index) {
         if (strcmp(argv[index], "--help") == 0 && argc == 2) {
@@ -224,6 +283,11 @@ int main(int argc, char **argv)
             promiscuous = true;
         } else if (strcmp(argv[index], "--payload-logging") == 0) {
             payload_logging_enabled = true;
+        } else if (strcmp(argv[index], "--inspect-payloads") == 0) {
+            payload_inspection_requested = true;
+        } else if (strcmp(argv[index], "--config") == 0 && index + 1 < argc &&
+                   config_path == NULL) {
+            config_path = argv[++index];
         } else if (strcmp(argv[index], "--payload-log") == 0 && index + 1 < argc &&
                    payload_log_path == NULL) {
             payload_log_path = argv[++index];
@@ -239,6 +303,22 @@ int main(int argc, char **argv)
         print_usage(stderr, argv[0]);
         return 2;
     }
+    if (!load_application_config(config_path, &config,
+                                 config_error, sizeof(config_error))) {
+        fprintf(stderr, "sniffit-ng: invalid configuration: %s\n", config_error);
+        return 2;
+    }
+    payload_inspection_enabled = config.inspect_payloads || payload_inspection_requested;
+    if (payload_inspection_enabled && !config.payload_display_acknowledged) {
+        fprintf(stderr,
+                "sniffit-ng: payload display requires this exact active config comment:\n%s\n",
+                SN_CONFIG_PAYLOAD_ACK_COMMENT);
+        return 2;
+    }
+    if (payload_inspection_enabled) {
+        fprintf(stderr,
+                "sniffit-ng: ICMP payload display enabled; inspect only authorized traffic and handle sensitive data ethically\n");
+    }
     if (payload_logging_enabled && !acknowledge_payload_logging()) {
         fprintf(stderr, "sniffit-ng: payload logging was not acknowledged; refusing to continue\n");
         return 1;
@@ -248,8 +328,10 @@ int main(int argc, char **argv)
     }
 
     if (pcap_path != NULL) {
-        return replay_pcap(pcap_path, payload_logging_enabled, payload_log_path);
+        return replay_pcap(pcap_path, payload_logging_enabled,
+                           payload_inspection_enabled, payload_log_path);
     }
     return run_live_capture(interface_name, promiscuous,
-                            payload_logging_enabled, payload_log_path);
+                            payload_logging_enabled, payload_inspection_enabled,
+                            payload_log_path);
 }

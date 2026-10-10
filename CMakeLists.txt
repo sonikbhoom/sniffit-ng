@@ -35,13 +35,18 @@ target_compile_definitions(sniffit_payload_log PRIVATE _DEFAULT_SOURCE)
 add_library(sniffit_privilege STATIC src/privilege.c)
 target_include_directories(sniffit_privilege PUBLIC include)
 
+add_library(sniffit_config STATIC src/config.c)
+target_include_directories(sniffit_config PUBLIC include)
+
 add_library(sniffit_ui STATIC src/ui.c)
 target_include_directories(sniffit_ui PUBLIC include)
 target_sources(sniffit_ui PRIVATE src/ui_window.c)
 target_link_libraries(sniffit_ui PUBLIC sniffit_monitor PkgConfig::NCURSESW)
 
 add_executable(sniffit-ng src/main.c)
-target_link_libraries(sniffit-ng PRIVATE sniffit_ui sniffit_payload_log sniffit_privilege)
+target_link_libraries(sniffit-ng PRIVATE
+    sniffit_ui sniffit_payload_log sniffit_privilege sniffit_config
+)
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(sniffit_packet PRIVATE
@@ -60,6 +65,9 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
         -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
     )
     target_compile_options(sniffit_privilege PRIVATE
+        -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+    )
+    target_compile_options(sniffit_config PRIVATE
         -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
     )
     target_compile_options(sniffit_ui PRIVATE
@@ -157,6 +165,9 @@ if(BUILD_TESTING)
 
     add_test(NAME cli_help COMMAND sniffit-ng --help)
     add_test(NAME cli_version COMMAND sniffit-ng --version)
+    add_test(NAME cli_inspection_requires_ack
+        COMMAND sniffit-ng --read-pcap /dev/null --inspect-payloads)
+    set_tests_properties(cli_inspection_requires_ack PROPERTIES WILL_FAIL TRUE)
 
     add_executable(test_ui_window tests/test_ui_window.c src/ui_window.c)
     target_include_directories(test_ui_window PRIVATE include)
@@ -166,10 +177,19 @@ if(BUILD_TESTING)
         )
     endif()
     add_test(NAME ui_window COMMAND test_ui_window)
+
+    add_executable(test_config tests/test_config.c)
+    target_link_libraries(test_config PRIVATE sniffit_config)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(test_config PRIVATE
+            -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+        )
+    endif()
+    add_test(NAME config_validation COMMAND test_config)
 endif()
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND SNIFFIT_NG_ENABLE_SANITIZERS)
-    foreach(target sniffit_packet sniffit_flow sniffit_capture sniffit_monitor sniffit_payload_log sniffit_privilege sniffit_ui sniffit-ng test_ui_window)
+    foreach(target sniffit_packet sniffit_flow sniffit_capture sniffit_monitor sniffit_payload_log sniffit_privilege sniffit_config sniffit_ui sniffit-ng test_ui_window test_config)
         target_compile_options(${target} PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
         target_link_options(${target} PUBLIC -fsanitize=address,undefined)
     endforeach()

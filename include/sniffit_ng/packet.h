@@ -16,6 +16,10 @@ struct sn_packet_view {
     uint8_t source_ipv4[4];
     uint8_t destination_ipv4[4];
     uint8_t protocol;
+    uint8_t icmp_type;
+    uint8_t icmp_code;
+    uint16_t icmp_identifier;
+    uint16_t icmp_sequence;
     uint16_t fragment_offset;
     bool more_fragments;
     bool transport_header_present;
