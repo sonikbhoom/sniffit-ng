@@ -73,11 +73,12 @@ The user has explicitly authorized development and testing of live capture again
 - **Publication choice:** Public repository, no license file for now. Public visibility does not grant reuse rights; revisit licensing before inviting contributions or advertising reuse.
 - The isolated `sniffit-ng` project has a safe Ethernet/IPv4 parser, bounded TCP/UDP/ICMP flow state, offline and live libpcap sources, a bounded monitor event queue, an initial curses workflow, and fail-closed acknowledged payload logging.
 - The non-sanitized `cap_net_raw+p` loopback test passed after privilege drop. The user confirmed the live curses screen and three-second rate display. The sanitizer suite passes; its live test is intentionally skipped when run without `CAP_NET_RAW`.
-- Published Git milestone: public repository `sonikbhoom/sniffit-ng`, branch `main`; latest verified remote commit is `32fd6a7`. The source milestone and publication-policy notes are pushed. The repository currently has no license, by user choice.
+- Authorized LAN ping: `razorback` resolved to `192.168.1.6`; eight ICMP echoes sent via `enp0s31f6` succeeded with 0% loss while the live monitor was running, and the user confirmed the GUI check worked. No broader LAN scan was performed.
+- Published Git milestone: public repository `sonikbhoom/sniffit-ng`, branch `main`; latest verified remote commit at this checkpoint is `31e302c`. The source milestone and publication-policy notes are pushed. The repository currently has no license, by user choice.
 
 ## Remaining Refactor Work
 
-1. **Verify LAN ping display:** Use the confirmed `enp0s31f6` interface on `192.168.1.3/24`; first obtain the user's specific LAN target IP/hostname. Generate only an authorized ping to that host and verify the ICMP rate/flow row, then revoke any temporary file capability.
+1. **LAN ping display:** Verified against authorized host `razorback` (`192.168.1.6`) with eight successful pings and live GUI confirmation. No broader LAN scan was performed.
 2. **Complete UI parity:** Implement and test `-I`-style extended descriptions, flow ordering/scrolling, terminal resize behavior, and detailed filter semantics. The initial list/details/mask/statistics/reset/quit workflow exists but is not full legacy parity.
 3. **Configuration and compatibility:** Add a bounded config parser and explicitly mapped legacy CLI options; preserve only validated semantics.
 4. **Output modes:** Add safe pcap recording and selected summary/dump modes. Keep cleartext payload output disabled unless the runtime acknowledgment policy is satisfied.
