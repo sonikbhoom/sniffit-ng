@@ -4,7 +4,7 @@ Sniffit NG is a security-focused C successor to the legacy Sniffit monitor, deve
 
 This repository currently has no license. Public visibility does not itself grant permission to reuse, modify, or redistribute the code.
 
-In the live curses view, select a flow and press Enter to open its details. The detail screen stays stable while capture continues and closes when any key is pressed.
+In the live curses view, select a flow and press Enter to open its inspection pane on the right while leaving the flow list visible on the left. The header includes fixed service hints for common TCP/UDP ports; it does not derive labels from packet contents. ICMP Echo request/reply records append to a scrolling history as packets arrive, below the flow metadata. The pane preloads up to 16 recent samples (up to 64 payload bytes each) when opened. It stays stable rather than repainting on idle polls; arrow keys or `j`/`k` switch the inspected flow, and other keys close the pane.
 
 ## Build and test
 
@@ -33,7 +33,7 @@ Payload persistence is disabled by default. To enable it for one offline replay,
 
 ## ICMP Payload Inspection
 
-Flow summaries and packet counters work without payload inspection. `--inspect-payloads` enables the Enter detail view to display a sanitized ICMP Echo payload sample. At most the latest 64 bytes per flow are retained in memory; this feature does not write payload bytes to disk. To avoid repeating the ethical acknowledgment, place this exact active comment in the config file:
+Flow summaries and packet counters work without payload inspection. `--inspect-payloads` enables the Enter detail view to display sanitized ICMP Echo payload records. At most 16 recent records per flow are kept in memory, each with at most 64 payload bytes; new records append to the open scrolling pane. This feature does not write payload bytes to disk. To avoid repeating the ethical acknowledgment, place this exact active comment in the config file:
 
 ```ini
 inspect_payloads = true

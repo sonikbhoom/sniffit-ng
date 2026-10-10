@@ -10,10 +10,20 @@
 #define SN_FLOW_TABLE_CAPACITY 256U
 #define SN_FLOW_DEFAULT_IDLE_TIMEOUT_NS 60000000000ULL
 #define SN_FLOW_ICMP_SAMPLE_CAPACITY 64U
+#define SN_FLOW_ICMP_HISTORY_CAPACITY 16U
 
 struct sn_flow_endpoint {
     uint8_t ipv4[4];
     uint16_t port;
+};
+
+struct sn_icmp_echo_sample {
+    uint8_t type;
+    uint8_t direction;
+    uint16_t identifier;
+    uint16_t sequence;
+    uint8_t payload[SN_FLOW_ICMP_SAMPLE_CAPACITY];
+    size_t payload_length;
 };
 
 struct sn_flow {
@@ -23,13 +33,9 @@ struct sn_flow {
     uint64_t packets[2];
     uint64_t bytes[2];
     uint64_t last_seen_ns;
-    bool has_icmp_echo_sample;
-    uint8_t icmp_echo_direction;
-    uint8_t icmp_type;
-    uint16_t icmp_identifier;
-    uint16_t icmp_sequence;
-    uint8_t icmp_payload_sample[SN_FLOW_ICMP_SAMPLE_CAPACITY];
-    size_t icmp_payload_sample_length;
+    struct sn_icmp_echo_sample icmp_history[SN_FLOW_ICMP_HISTORY_CAPACITY];
+    size_t icmp_history_count;
+    size_t icmp_history_next;
 };
 
 struct sn_flow_table {
@@ -57,5 +63,9 @@ enum sn_flow_update_result sn_flow_table_update(
     const struct sn_flow **flow_out);
 
 size_t sn_flow_table_count(const struct sn_flow_table *table);
+
+const struct sn_icmp_echo_sample *sn_flow_icmp_history_at(
+    const struct sn_flow *flow,
+    size_t chronological_index);
 
 #endif

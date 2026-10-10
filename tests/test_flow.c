@@ -176,17 +176,19 @@ static void test_icmp_payload_requires_opt_in_and_is_bounded(void)
 
     sn_flow_table_init(&table, 100U);
     assert(sn_flow_table_update(&table, &packet, 1U, &flow) == SN_FLOW_CREATED);
-    assert(flow != NULL && !flow->has_icmp_echo_sample);
+    assert(flow != NULL && flow->icmp_history_count == 0U);
 
     sn_flow_table_set_payload_inspection(&table, true);
     assert(sn_flow_table_update(&table, &packet, 2U, &flow) == SN_FLOW_UPDATED);
-    assert(flow->has_icmp_echo_sample);
-    assert(flow->icmp_type == 8U);
-    assert(flow->icmp_echo_direction == 0U);
-    assert(flow->icmp_identifier == 0x1234U);
-    assert(flow->icmp_sequence == 7U);
-    assert(flow->icmp_payload_sample_length == SN_FLOW_ICMP_SAMPLE_CAPACITY);
-    assert(memcmp(flow->icmp_payload_sample, payload,
+    size_t latest = (flow->icmp_history_next + SN_FLOW_ICMP_HISTORY_CAPACITY - 1U) %
+                    SN_FLOW_ICMP_HISTORY_CAPACITY;
+    assert(flow->icmp_history_count == 1U);
+    assert(flow->icmp_history[latest].type == 8U);
+    assert(flow->icmp_history[latest].direction == 0U);
+    assert(flow->icmp_history[latest].identifier == 0x1234U);
+    assert(flow->icmp_history[latest].sequence == 7U);
+    assert(flow->icmp_history[latest].payload_length == SN_FLOW_ICMP_SAMPLE_CAPACITY);
+    assert(memcmp(flow->icmp_history[latest].payload, payload,
                   SN_FLOW_ICMP_SAMPLE_CAPACITY) == 0);
 
     packet.icmp_type = 0U;
@@ -194,16 +196,65 @@ static void test_icmp_payload_requires_opt_in_and_is_bounded(void)
     packet.destination_ipv4[3] = 1U;
     packet.icmp_sequence = 8U;
     assert(sn_flow_table_update(&table, &packet, 3U, &flow) == SN_FLOW_UPDATED);
-    assert(flow->icmp_type == 0U);
-    assert(flow->icmp_echo_direction == 1U);
-    assert(flow->icmp_sequence == 8U);
+    latest = (flow->icmp_history_next + SN_FLOW_ICMP_HISTORY_CAPACITY - 1U) %
+             SN_FLOW_ICMP_HISTORY_CAPACITY;
+    assert(flow->icmp_history_count == 2U);
+    assert(flow->icmp_history[latest].type == 0U);
+    assert(flow->icmp_history[latest].direction == 1U);
+    assert(flow->icmp_history[latest].sequence == 8U);
 
     sn_flow_table_set_payload_inspection(&table, false);
-    assert(!flow->has_icmp_echo_sample);
-    assert(flow->icmp_payload_sample_length == 0U);
-    for (size_t index = 0U; index < sizeof(flow->icmp_payload_sample); ++index) {
-        assert(flow->icmp_payload_sample[index] == 0U);
+    assert(flow->icmp_history_count == 0U);
+    for (size_t sample = 0U; sample < SN_FLOW_ICMP_HISTORY_CAPACITY; ++sample) {
+        assert(flow->icmp_history[sample].payload_length == 0U);
+        for (size_t index = 0U; index < sizeof(flow->icmp_history[sample].payload); ++index) {
+            assert(flow->icmp_history[sample].payload[index] == 0U);
+        }
     }
+}
+
+static void test_icmp_history_keeps_recent_samples_in_order(void)
+{
+    struct sn_flow_table table;
+    struct sn_packet_view packet = {0};
+    const struct sn_flow *flow = NULL;
+    uint8_t transport[8] = {8U, 0U, 0U, 0U, 0U, 9U, 0U, 0U};
+    uint8_t payload = 'x';
+
+    packet.protocol = 1U;
+    packet.icmp_type = 8U;
+    packet.icmp_identifier = 9U;
+    packet.ipv4_total_length = 29U;
+    packet.source_ipv4[0] = 192U;
+    packet.source_ipv4[3] = 1U;
+    packet.destination_ipv4[0] = 192U;
+    packet.destination_ipv4[3] = 2U;
+    packet.transport = transport;
+    packet.transport_length = sizeof(transport) + 1U;
+    packet.transport_header_present = true;
+    packet.payload = &payload;
+    packet.payload_length = 1U;
+
+    sn_flow_table_init(&table, UINT64_MAX);
+    sn_flow_table_set_payload_inspection(&table, true);
+    for (uint16_t sequence = 1U; sequence <= SN_FLOW_ICMP_HISTORY_CAPACITY + 4U; ++sequence) {
+        packet.icmp_sequence = sequence;
+        transport[6] = (uint8_t)(sequence >> 8);
+        transport[7] = (uint8_t)sequence;
+        assert(sn_flow_table_update(&table, &packet, sequence, &flow) ==
+               (sequence == 1U ? SN_FLOW_CREATED : SN_FLOW_UPDATED));
+    }
+
+    assert(flow->icmp_history_count == SN_FLOW_ICMP_HISTORY_CAPACITY);
+    for (size_t index = 0U; index < SN_FLOW_ICMP_HISTORY_CAPACITY; ++index) {
+        const struct sn_icmp_echo_sample *sample =
+            sn_flow_icmp_history_at(flow, index);
+        assert(sample != NULL);
+        assert(sample->sequence == index + 5U);
+        assert(sample->payload_length == 1U);
+        assert(sample->payload[0] == 'x');
+    }
+    assert(sn_flow_icmp_history_at(flow, SN_FLOW_ICMP_HISTORY_CAPACITY) == NULL);
 }
 
 int main(void)
@@ -215,6 +266,7 @@ int main(void)
     test_time_must_be_monotonic_per_flow();
     test_counters_saturate();
     test_icmp_payload_requires_opt_in_and_is_bounded();
+    test_icmp_history_keeps_recent_samples_in_order();
     puts("flow tests passed");
     return 0;
 }

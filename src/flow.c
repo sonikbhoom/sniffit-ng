@@ -107,9 +107,9 @@ void sn_flow_table_set_payload_inspection(struct sn_flow_table *table, bool enab
     if (!enabled) {
         for (size_t index = 0U; index < SN_FLOW_TABLE_CAPACITY; ++index) {
             struct sn_flow *flow = &table->entries[index];
-            flow->has_icmp_echo_sample = false;
-            flow->icmp_payload_sample_length = 0U;
-            memset(flow->icmp_payload_sample, 0, sizeof(flow->icmp_payload_sample));
+            memset(flow->icmp_history, 0, sizeof(flow->icmp_history));
+            flow->icmp_history_count = 0U;
+            flow->icmp_history_next = 0U;
         }
     }
 }
@@ -182,18 +182,25 @@ enum sn_flow_update_result sn_flow_table_update(
     if (table->inspect_payloads && packet->protocol == 1U &&
         (packet->icmp_type == 0U || packet->icmp_type == 8U)) {
         size_t sample_length = packet->payload_length;
+        struct sn_icmp_echo_sample *sample =
+            &slot->icmp_history[slot->icmp_history_next];
 
         if (sample_length > SN_FLOW_ICMP_SAMPLE_CAPACITY) {
             sample_length = SN_FLOW_ICMP_SAMPLE_CAPACITY;
         }
-        slot->has_icmp_echo_sample = true;
-        slot->icmp_echo_direction = (uint8_t)key.direction;
-        slot->icmp_type = packet->icmp_type;
-        slot->icmp_identifier = packet->icmp_identifier;
-        slot->icmp_sequence = packet->icmp_sequence;
-        slot->icmp_payload_sample_length = sample_length;
+        *sample = (struct sn_icmp_echo_sample){0};
+        sample->type = packet->icmp_type;
+        sample->direction = (uint8_t)key.direction;
+        sample->identifier = packet->icmp_identifier;
+        sample->sequence = packet->icmp_sequence;
+        sample->payload_length = sample_length;
         if (sample_length > 0U && packet->payload != NULL) {
-            memcpy(slot->icmp_payload_sample, packet->payload, sample_length);
+            memcpy(sample->payload, packet->payload, sample_length);
+        }
+        slot->icmp_history_next =
+            (slot->icmp_history_next + 1U) % SN_FLOW_ICMP_HISTORY_CAPACITY;
+        if (slot->icmp_history_count < SN_FLOW_ICMP_HISTORY_CAPACITY) {
+            ++slot->icmp_history_count;
         }
     }
 
@@ -219,4 +226,19 @@ size_t sn_flow_table_count(const struct sn_flow_table *table)
         }
     }
     return count;
+}
+
+const struct sn_icmp_echo_sample *sn_flow_icmp_history_at(
+    const struct sn_flow *flow,
+    size_t chronological_index)
+{
+    size_t oldest_index;
+
+    if (flow == NULL || chronological_index >= flow->icmp_history_count) {
+        return NULL;
+    }
+    oldest_index = (flow->icmp_history_next + SN_FLOW_ICMP_HISTORY_CAPACITY -
+                    flow->icmp_history_count) % SN_FLOW_ICMP_HISTORY_CAPACITY;
+    return &flow->icmp_history[(oldest_index + chronological_index) %
+                               SN_FLOW_ICMP_HISTORY_CAPACITY];
 }

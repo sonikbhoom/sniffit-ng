@@ -7,12 +7,12 @@
 
 #include <stdbool.h>
 #include <errno.h>
-#include <limits.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#define SN_CONFIG_PATH_CAPACITY 4096U
 
 static void print_usage(FILE *stream, const char *program)
 {
@@ -27,7 +27,7 @@ static bool load_application_config(const char *requested_path,
                                     char *error,
                                     size_t error_capacity)
 {
-    char default_path[PATH_MAX];
+    char default_path[SN_CONFIG_PATH_CAPACITY];
     const char *config_path = requested_path;
     const char *base;
 
@@ -109,7 +109,6 @@ static enum sn_ui_poll_result poll_live_capture(void *context,
         }
 
         (void)sn_monitor_process(live->monitor, &packet);
-        drain_monitor_events(live->monitor);
         updated = true;
         if (live->payload_log != NULL &&
             !sn_payload_log_write_packet(live->payload_log, &packet)) {
