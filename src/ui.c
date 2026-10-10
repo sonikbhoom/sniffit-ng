@@ -336,7 +336,6 @@ static void show_details(const struct sn_flow *flow,
                     mvaddstr(row + 7, 3, "acknowledgment comment to the loaded config. No bytes retained.");
                 }
             }
-            mvaddstr(LINES - 2, 3, "Press Escape to return");
             refresh();
         }
         key = getch();
