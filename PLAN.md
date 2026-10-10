@@ -73,7 +73,7 @@ The user has explicitly authorized development and testing of live capture again
 - **Publication choice:** Public repository, no license file for now. Public visibility does not grant reuse rights; revisit licensing before inviting contributions or advertising reuse.
 - The isolated `sniffit-ng` project has a safe Ethernet/IPv4 parser, bounded TCP/UDP/ICMP flow state, offline and live libpcap sources, a bounded monitor event queue, an initial curses workflow, and fail-closed acknowledged payload logging.
 - The non-sanitized `cap_net_raw+p` loopback test passed after privilege drop. The user confirmed the live curses screen and three-second rate display. The sanitizer suite passes; its live test is intentionally skipped when run without `CAP_NET_RAW`.
-- Local Git milestone: commit `a592f36` on `main`. Push to `https://github.com/sonikbhoom/sniffit-ng` did not complete: GitHub returned `Repository not found`; SSH returned `Permission denied (publickey)`. The destination may be private, not created, mistyped, or inaccessible to the configured credentials. Do not claim the code is published until a push succeeds.
+- Published Git milestone: public repository `sonikbhoom/sniffit-ng`, branch `main`; latest verified remote commit is `32fd6a7`. The source milestone and publication-policy notes are pushed. The repository currently has no license, by user choice.
 
 ## Remaining Refactor Work
 
@@ -82,4 +82,4 @@ The user has explicitly authorized development and testing of live capture again
 3. **Configuration and compatibility:** Add a bounded config parser and explicitly mapped legacy CLI options; preserve only validated semantics.
 4. **Output modes:** Add safe pcap recording and selected summary/dump modes. Keep cleartext payload output disabled unless the runtime acknowledgment policy is satisfied.
 5. **Hardening:** Add parser fuzz targets, broader malformed-pcap corpus, pseudo-terminal curses interaction tests, and privilege/capability tests across supported Linux environments. Decide and document behavior for non-Ethernet link types.
-6. **Release/publish:** Resolve GitHub repository existence/access, push the local milestone, add CI for sanitizer tests, and document installation/file-capability policy. Never grant file capabilities to a developer-writable binary for deployment.
+6. **Release/hardening:** Add CI for sanitizer tests, document installation/file-capability policy, and decide licensing before inviting reuse/contributions. The initial milestone is already published. Never grant file capabilities to a developer-writable binary for deployment.
