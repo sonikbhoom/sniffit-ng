@@ -182,11 +182,21 @@ static void test_icmp_payload_requires_opt_in_and_is_bounded(void)
     assert(sn_flow_table_update(&table, &packet, 2U, &flow) == SN_FLOW_UPDATED);
     assert(flow->has_icmp_echo_sample);
     assert(flow->icmp_type == 8U);
+    assert(flow->icmp_echo_direction == 0U);
     assert(flow->icmp_identifier == 0x1234U);
     assert(flow->icmp_sequence == 7U);
     assert(flow->icmp_payload_sample_length == SN_FLOW_ICMP_SAMPLE_CAPACITY);
     assert(memcmp(flow->icmp_payload_sample, payload,
                   SN_FLOW_ICMP_SAMPLE_CAPACITY) == 0);
+
+    packet.icmp_type = 0U;
+    packet.source_ipv4[3] = 2U;
+    packet.destination_ipv4[3] = 1U;
+    packet.icmp_sequence = 8U;
+    assert(sn_flow_table_update(&table, &packet, 3U, &flow) == SN_FLOW_UPDATED);
+    assert(flow->icmp_type == 0U);
+    assert(flow->icmp_echo_direction == 1U);
+    assert(flow->icmp_sequence == 8U);
 
     sn_flow_table_set_payload_inspection(&table, false);
     assert(!flow->has_icmp_echo_sample);

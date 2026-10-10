@@ -40,7 +40,7 @@ target_include_directories(sniffit_config PUBLIC include)
 
 add_library(sniffit_ui STATIC src/ui.c)
 target_include_directories(sniffit_ui PUBLIC include)
-target_sources(sniffit_ui PRIVATE src/ui_window.c)
+target_sources(sniffit_ui PRIVATE src/ui_window.c src/icmp_payload_view.c)
 target_link_libraries(sniffit_ui PUBLIC sniffit_monitor PkgConfig::NCURSESW)
 
 add_executable(sniffit-ng src/main.c)
@@ -186,10 +186,21 @@ if(BUILD_TESTING)
         )
     endif()
     add_test(NAME config_validation COMMAND test_config)
+
+    add_executable(test_icmp_payload_view
+        tests/test_icmp_payload_view.c src/icmp_payload_view.c
+    )
+    target_include_directories(test_icmp_payload_view PRIVATE include)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(test_icmp_payload_view PRIVATE
+            -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+        )
+    endif()
+    add_test(NAME icmp_payload_view COMMAND test_icmp_payload_view)
 endif()
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND SNIFFIT_NG_ENABLE_SANITIZERS)
-    foreach(target sniffit_packet sniffit_flow sniffit_capture sniffit_monitor sniffit_payload_log sniffit_privilege sniffit_config sniffit_ui sniffit-ng test_ui_window test_config)
+    foreach(target sniffit_packet sniffit_flow sniffit_capture sniffit_monitor sniffit_payload_log sniffit_privilege sniffit_config sniffit_ui sniffit-ng test_ui_window test_config test_icmp_payload_view)
         target_compile_options(${target} PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
         target_link_options(${target} PUBLIC -fsanitize=address,undefined)
     endforeach()

@@ -43,6 +43,7 @@ At each inspection checkpoint, report: deliverable completed, exact command/test
 - **Live loopback capture:** The post-drop test now waits on libpcap's selectable fd and uses the permitted-only `CAP_NET_RAW` path. A non-sanitized probe with temporary `cap_net_raw+p` passed after opening pcap, dropping capabilities, and capturing its own loopback UDP packet. The regular ASan/UBSan run skips live pcap because the test runner lacks `CAP_NET_RAW`.
 - **Gate status:** Offline and post-drop loopback capture gates passed. The user confirmed the live curses application now renders successfully with the capability-backed capture path. This closes the initial live UI bring-up gate; remaining parity interactions and longer-running capture behavior stay on the feature checklist.
 - **Rate panel:** A deterministic three-second packet/byte sampler is implemented and unit-tested. The user confirmed the live rate display check is complete; the temporary file capability was removed afterward.
+- **ICMP Enter details:** ICMP Echo request/reply type, canonical flow direction, identifier, sequence, and a sanitized 64-byte hex/ASCII sample are displayed only when the config acknowledgment enables inspection. The parser, bounded flow sample, formatter, and acknowledgment gate are covered by tests; no payload is written to disk by this feature.
 
 ## Initial Feature Policy
 

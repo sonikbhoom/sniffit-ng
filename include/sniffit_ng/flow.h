@@ -24,6 +24,7 @@ struct sn_flow {
     uint64_t bytes[2];
     uint64_t last_seen_ns;
     bool has_icmp_echo_sample;
+    uint8_t icmp_echo_direction;
     uint8_t icmp_type;
     uint16_t icmp_identifier;
     uint16_t icmp_sequence;

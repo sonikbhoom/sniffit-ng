@@ -1,4 +1,5 @@
 #include "sniffit_ng/ui.h"
+#include "sniffit_ng/icmp_payload_view.h"
 
 #include <arpa/inet.h>
 #include <ctype.h>
@@ -273,8 +274,7 @@ static void show_details(const struct sn_flow *flow, bool payload_inspection_act
 {
     char endpoint_a[INET_ADDRSTRLEN] = "?";
     char endpoint_b[INET_ADDRSTRLEN] = "?";
-    char payload_text[SN_FLOW_ICMP_SAMPLE_CAPACITY + 1U];
-    int row = LINES / 2 - 3;
+    int row = 1;
 
     (void)inet_ntop(AF_INET, flow->endpoints[0].ipv4,
                     endpoint_a, sizeof(endpoint_a));
@@ -285,27 +285,38 @@ static void show_details(const struct sn_flow *flow, bool payload_inspection_act
     mvprintw(row, 3, "%s %s:%u <-> %s:%u", protocol_name(flow->protocol),
              endpoint_a, flow->endpoints[0].port,
              endpoint_b, flow->endpoints[1].port);
-    mvprintw(row + 2, 3, "Packets: %llu / %llu",
+    mvprintw(row + 2, 3, "Packets A>B / B>A: %llu / %llu",
              (unsigned long long)flow->packets[0],
              (unsigned long long)flow->packets[1]);
-    mvprintw(row + 3, 3, "Bytes:   %llu / %llu",
+    mvprintw(row + 3, 3, "Bytes A>B / B>A:   %llu / %llu",
              (unsigned long long)flow->bytes[0],
              (unsigned long long)flow->bytes[1]);
     if (flow->protocol == 1U) {
         if (flow->has_icmp_echo_sample) {
-            mvprintw(row + 5, 3, "ICMP Echo %s, id=%u, sequence=%u",
+            mvprintw(row + 5, 3, "ICMP Echo %s %s, id=%u, sequence=%u",
                      flow->icmp_type == 8U ? "request" : "reply",
+                     flow->icmp_echo_direction == 0U ? "A>B" : "B>A",
                      flow->icmp_identifier, flow->icmp_sequence);
             if (payload_inspection_active) {
-                for (size_t index = 0U; index < flow->icmp_payload_sample_length; ++index) {
-                    unsigned char byte = flow->icmp_payload_sample[index];
-                    payload_text[index] = isprint(byte) ? (char)byte : '.';
+                mvprintw(row + 6, 3, "Payload sample (%zu/%u bytes), hex and ASCII:",
+                         flow->icmp_payload_sample_length,
+                         SN_FLOW_ICMP_SAMPLE_CAPACITY);
+                for (size_t offset = 0U, line = 0U;
+                     offset < flow->icmp_payload_sample_length;
+                     offset += SN_ICMP_DISPLAY_ROW_BYTES, ++line) {
+                    char hex[SN_ICMP_DISPLAY_HEX_CAPACITY];
+                    char ascii[SN_ICMP_DISPLAY_ASCII_CAPACITY];
+                    size_t row_length = sn_icmp_format_payload_row(
+                        flow->icmp_payload_sample + offset,
+                        flow->icmp_payload_sample_length - offset,
+                        hex, sizeof(hex), ascii, sizeof(ascii));
+
+                    if (row_length == 0U) {
+                        break;
+                    }
+                    mvprintw(row + 7 + (int)line, 3, "%04zu  %-47s |%s|",
+                             offset, hex, ascii);
                 }
-                payload_text[flow->icmp_payload_sample_length] = '\0';
-                mvprintw(row + 6, 3, "Payload sample (%zu bytes):",
-                         flow->icmp_payload_sample_length);
-                mvaddnstr(row + 7, 3, payload_text,
-                          (int)flow->icmp_payload_sample_length);
             }
         } else if (payload_inspection_active) {
             mvaddstr(row + 5, 3, "No ICMP Echo payload sample retained yet.");

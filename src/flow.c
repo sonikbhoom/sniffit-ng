@@ -187,6 +187,7 @@ enum sn_flow_update_result sn_flow_table_update(
             sample_length = SN_FLOW_ICMP_SAMPLE_CAPACITY;
         }
         slot->has_icmp_echo_sample = true;
+        slot->icmp_echo_direction = (uint8_t)key.direction;
         slot->icmp_type = packet->icmp_type;
         slot->icmp_identifier = packet->icmp_identifier;
         slot->icmp_sequence = packet->icmp_sequence;
