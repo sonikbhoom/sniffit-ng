@@ -48,6 +48,44 @@ bool sn_decode_tcp(const struct sn_packet_view *packet,
                     source_port, destination_port, tcp[13],
                     read_be32(tcp + 4U), read_be32(tcp + 8U),
                     read_be16(tcp + 14U), packet->payload_length, application);
+    } else if ((source_port == 53U || destination_port == 53U) &&
+               sn_decode_dns_tcp(packet->payload, packet->payload_length,
+                                 application, sizeof(application))) {
+        formatted_length = snprintf(output, output_capacity,
+                    "TCP %u->%u flags=0x%02x seq=%u ack=%u win=%u payload=%zu; %s",
+                    source_port, destination_port, tcp[13],
+                    read_be32(tcp + 4U), read_be32(tcp + 8U),
+                    read_be16(tcp + 14U), packet->payload_length, application);
+    } else if ((source_port == 443U || destination_port == 443U ||
+                source_port == 853U || destination_port == 853U ||
+                source_port == 465U || destination_port == 465U ||
+                source_port == 636U || destination_port == 636U ||
+                source_port == 993U || destination_port == 993U ||
+                source_port == 995U || destination_port == 995U ||
+                source_port == 8443U || destination_port == 8443U) &&
+               sn_decode_tls(packet->payload, packet->payload_length,
+                             application, sizeof(application))) {
+        formatted_length = snprintf(output, output_capacity,
+                    "TCP %u->%u flags=0x%02x seq=%u ack=%u win=%u payload=%zu; %s",
+                    source_port, destination_port, tcp[13],
+                    read_be32(tcp + 4U), read_be32(tcp + 8U),
+                    read_be16(tcp + 14U), packet->payload_length, application);
+    } else if ((source_port == 49U || destination_port == 49U) &&
+               sn_decode_tacacs(packet->payload, packet->payload_length,
+                                application, sizeof(application))) {
+        formatted_length = snprintf(output, output_capacity,
+                    "TCP %u->%u flags=0x%02x seq=%u ack=%u win=%u payload=%zu; %s",
+                    source_port, destination_port, tcp[13],
+                    read_be32(tcp + 4U), read_be32(tcp + 8U),
+                    read_be16(tcp + 14U), packet->payload_length, application);
+    } else if ((source_port == 514U || destination_port == 514U) &&
+               sn_decode_syslog(packet->payload, packet->payload_length,
+                                application, sizeof(application))) {
+        formatted_length = snprintf(output, output_capacity,
+                    "TCP %u->%u flags=0x%02x seq=%u ack=%u win=%u payload=%zu; %s",
+                    source_port, destination_port, tcp[13],
+                    read_be32(tcp + 4U), read_be32(tcp + 8U),
+                    read_be16(tcp + 14U), packet->payload_length, application);
     } else {
         formatted_length = snprintf(output, output_capacity,
                     "TCP %u->%u flags=0x%02x seq=%u ack=%u win=%u payload=%zu",

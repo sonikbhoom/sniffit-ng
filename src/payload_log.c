@@ -22,7 +22,7 @@ static void copy_error(char *destination, size_t capacity, const char *message)
     }
 }
 
-bool sn_payload_logging_confirm(FILE *input, FILE *output)
+bool sn_capture_recording_confirm(FILE *input, FILE *output)
 {
     char response[96];
     char *newline;
@@ -30,9 +30,9 @@ bool sn_payload_logging_confirm(FILE *input, FILE *output)
     if (input == NULL || output == NULL) {
         return false;
     }
-    fputs("WARNING: Payload logging may capture credentials, personal information, and confidential communications.\n"
-          "Only capture traffic you own or are explicitly authorized to inspect. Obtain required consent,\n"
-          "minimize collection, protect the output file, and delete it according to your retention policy.\n"
+        fputs("WARNING: Capture recording can retain complete packets, including credentials, personal information, and confidential communications.\n"
+            "Only record traffic you own or are explicitly authorized to inspect. Obtain required consent,\n"
+            "minimize collection, protect the output file, and delete it according to your retention policy.\n"
           "To continue, type exactly:\n"
           SN_PAYLOAD_ACK_PHRASE "\n> ", output);
     if (fflush(output) != 0 || fgets(response, sizeof(response), input) == NULL) {

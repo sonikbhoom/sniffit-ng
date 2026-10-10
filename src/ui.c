@@ -20,7 +20,7 @@ struct ui_detail_context {
     size_t *selected;
     size_t *scroll_start;
     bool show_stats;
-    bool payload_logging_active;
+    bool recording_active;
     bool payload_inspection_active;
     bool *capture_polling;
     const char **capture_status;
@@ -99,7 +99,7 @@ static void draw_screen(struct sn_monitor *monitor,
                         size_t selected,
                         size_t scroll_start,
                         bool show_stats,
-                        bool payload_logging_active,
+                        bool recording_active,
                         bool payload_inspection_active,
                         const char *capture_status,
                         const struct sn_monitor_rates *rates)
@@ -115,9 +115,9 @@ static void draw_screen(struct sn_monitor *monitor,
     }
 
     attron(A_BOLD);
-    mvprintw(0, 0, "Sniffit NG | Ethernet / IPv4 monitor%s%s",
-             payload_logging_active ? " | PAYLOAD LOGGING ACTIVE" : "",
-             payload_inspection_active ? " | ICMP PAYLOAD DISPLAY ENABLED" : "");
+        mvprintw(0, 0, "Sniffit NG | Ethernet / IPv4 monitor%s%s",
+                 recording_active ? " | RECORDING ACTIVE" : "",
+                 payload_inspection_active ? " | ICMP PAYLOAD DISPLAY ENABLED" : "");
     attroff(A_BOLD);
     mvprintw(1, 0, "PROTO  ENDPOINT A                         ENDPOINT B                         PACKETS A>B/B>A");
     mvhline(2, 0, ACS_HLINE, COLS);
@@ -481,7 +481,7 @@ static void draw_detail_background(struct ui_detail_context *context)
 {
     draw_screen(context->monitor, context->filter, context->flows,
                 context->flow_count, *context->selected, *context->scroll_start,
-                context->show_stats, context->payload_logging_active,
+                context->show_stats, context->recording_active,
                 context->payload_inspection_active, *context->capture_status,
                 context->rates);
 }
@@ -596,7 +596,7 @@ static void reset_monitor(struct sn_monitor *monitor)
 }
 
 int sn_ui_run(struct sn_monitor *monitor,
-              bool payload_logging_active,
+              bool recording_active,
               bool payload_inspection_active,
               sn_ui_poll_callback poll_capture,
               void *poll_context)
@@ -652,14 +652,14 @@ int sn_ui_run(struct sn_monitor *monitor,
             .selected = &selected,
             .scroll_start = &scroll_start,
             .show_stats = show_stats,
-            .payload_logging_active = payload_logging_active,
+            .recording_active = recording_active,
             .payload_inspection_active = payload_inspection_active,
             .capture_polling = &capture_polling,
             .capture_status = &capture_status,
             .rates = rates_ready ? &rates : (capture_polling ? &rates : NULL)
         };
         draw_screen(monitor, &filter, flows, flow_count, selected, scroll_start, show_stats,
-                payload_logging_active, payload_inspection_active, capture_status,
+                recording_active, payload_inspection_active, capture_status,
                 detail_context.rates);
         key = getch();
         if (key == 'q' || key == 'Q') {

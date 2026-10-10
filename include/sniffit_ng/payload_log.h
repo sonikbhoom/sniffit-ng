@@ -11,7 +11,7 @@
 
 struct sn_payload_log;
 
-bool sn_payload_logging_confirm(FILE *input, FILE *output);
+bool sn_capture_recording_confirm(FILE *input, FILE *output);
 
 struct sn_payload_log *sn_payload_log_open(
     const char *path,

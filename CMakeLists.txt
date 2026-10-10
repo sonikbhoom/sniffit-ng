@@ -10,11 +10,25 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(PCAP REQUIRED IMPORTED_TARGET libpcap)
 pkg_check_modules(NCURSESW REQUIRED IMPORTED_TARGET ncursesw)
 option(SNIFFIT_NG_ENABLE_SANITIZERS "Build with AddressSanitizer and UBSan" OFF)
+option(SNIFFIT_NG_BUILD_PACKET_FUZZER "Build the Clang/libFuzzer Ethernet/SLL packet parser target" OFF)
 set(SNIFFIT_NG_CUSTOM_HTTP_DECODER_SOURCE "" CACHE FILEPATH
     "Optional user-supplied HTTP metadata extension source (disabled by default)")
 
 add_library(sniffit_packet STATIC src/packet.c)
 target_include_directories(sniffit_packet PUBLIC include)
+
+if(SNIFFIT_NG_BUILD_PACKET_FUZZER)
+    if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "SNIFFIT_NG_BUILD_PACKET_FUZZER requires Clang with libFuzzer")
+    endif()
+    add_executable(fuzz_packet tests/fuzz_packet.c src/packet.c)
+    target_include_directories(fuzz_packet PRIVATE include)
+    target_compile_options(fuzz_packet PRIVATE
+        -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+        -fsanitize=fuzzer-no-link,address,undefined -fno-omit-frame-pointer
+    )
+    target_link_options(fuzz_packet PRIVATE -fsanitize=fuzzer,address,undefined)
+endif()
 
 add_library(sniffit_decode STATIC
     src/protocol_decode.c
@@ -75,6 +89,11 @@ target_include_directories(sniffit_capture PUBLIC include)
 target_link_libraries(sniffit_capture PUBLIC PkgConfig::PCAP)
 target_compile_definitions(sniffit_capture PRIVATE _DEFAULT_SOURCE)
 
+add_library(sniffit_pcap_writer STATIC src/pcap_writer.c)
+target_include_directories(sniffit_pcap_writer PUBLIC include)
+target_link_libraries(sniffit_pcap_writer PUBLIC PkgConfig::PCAP)
+target_compile_definitions(sniffit_pcap_writer PRIVATE _DEFAULT_SOURCE)
+
 add_library(sniffit_monitor STATIC src/monitor.c)
 target_include_directories(sniffit_monitor PUBLIC include)
 target_link_libraries(sniffit_monitor PUBLIC sniffit_capture sniffit_flow)
@@ -97,7 +116,7 @@ target_link_libraries(sniffit_ui PUBLIC sniffit_monitor PkgConfig::NCURSESW)
 
 add_executable(sniffit-ng src/main.c)
 target_link_libraries(sniffit-ng PRIVATE
-    sniffit_ui sniffit_payload_log sniffit_privilege sniffit_config
+    sniffit_ui sniffit_payload_log sniffit_pcap_writer sniffit_privilege sniffit_config
 )
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
@@ -111,6 +130,9 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
         -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
     )
     target_compile_options(sniffit_capture PRIVATE
+        -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+    )
+    target_compile_options(sniffit_pcap_writer PRIVATE
         -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
     )
     target_compile_options(sniffit_monitor PRIVATE
@@ -171,6 +193,16 @@ if(BUILD_TESTING)
         )
     endif()
     add_test(NAME capture_offline COMMAND test_capture)
+
+    add_executable(test_pcap_writer tests/test_pcap_writer.c)
+    target_link_libraries(test_pcap_writer PRIVATE sniffit_pcap_writer sniffit_capture)
+    target_compile_definitions(test_pcap_writer PRIVATE _DEFAULT_SOURCE)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(test_pcap_writer PRIVATE
+            -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+        )
+    endif()
+    add_test(NAME pcap_writer COMMAND test_pcap_writer)
 
     add_executable(test_capture_pipeline tests/test_capture_pipeline.c)
     target_link_libraries(test_capture_pipeline PRIVATE sniffit_monitor PkgConfig::PCAP)
@@ -233,6 +265,9 @@ if(BUILD_TESTING)
     add_test(NAME cli_inspection_requires_ack
         COMMAND sniffit-ng --read-pcap /dev/null --inspect-payloads)
     set_tests_properties(cli_inspection_requires_ack PROPERTIES WILL_FAIL TRUE)
+    add_test(NAME cli_write_pcap_requires_source
+        COMMAND sniffit-ng --write-pcap ${CMAKE_CURRENT_BINARY_DIR}/unused-output.pcap)
+    set_tests_properties(cli_write_pcap_requires_source PROPERTIES WILL_FAIL TRUE)
 
     add_executable(test_ui_window tests/test_ui_window.c src/ui_window.c)
     target_include_directories(test_ui_window PRIVATE include)
@@ -242,6 +277,19 @@ if(BUILD_TESTING)
         )
     endif()
     add_test(NAME ui_window COMMAND test_ui_window)
+
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        find_library(UTIL_LIBRARY util)
+        add_executable(test_ui_pty tests/test_ui_pty.c)
+        target_link_libraries(test_ui_pty PRIVATE sniffit_ui ${UTIL_LIBRARY})
+        if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+            target_compile_options(test_ui_pty PRIVATE
+                -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+            )
+        endif()
+        add_test(NAME ui_curses_pty COMMAND test_ui_pty)
+        set_tests_properties(ui_curses_pty PROPERTIES TIMEOUT 15)
+    endif()
 
     add_executable(test_config tests/test_config.c)
     target_link_libraries(test_config PRIVATE sniffit_config)
@@ -265,7 +313,7 @@ if(BUILD_TESTING)
 endif()
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND SNIFFIT_NG_ENABLE_SANITIZERS)
-    foreach(target sniffit_packet sniffit_decode sniffit_flow sniffit_capture sniffit_monitor sniffit_payload_log sniffit_privilege sniffit_config sniffit_ui sniffit-ng test_ui_window test_config test_icmp_payload_view)
+    foreach(target sniffit_packet sniffit_decode sniffit_flow sniffit_capture sniffit_pcap_writer sniffit_monitor sniffit_payload_log sniffit_privilege sniffit_config sniffit_ui sniffit-ng test_ui_window test_ui_pty test_config test_icmp_payload_view test_pcap_writer)
         target_compile_options(${target} PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
         target_link_options(${target} PUBLIC -fsanitize=address,undefined)
     endforeach()

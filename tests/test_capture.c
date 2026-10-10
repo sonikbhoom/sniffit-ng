@@ -54,10 +54,13 @@ static void test_offline_packet_lifetime_and_eof(void)
     char error[256] = {0};
     struct sn_capture_packet packet;
     struct sn_capture *capture;
+    enum sn_packet_link_type link_type = SN_PACKET_LINK_LINUX_SLL;
 
     create_test_pcap(path, sizeof(path), DLT_EN10MB);
     capture = sn_capture_open_offline(path, error, sizeof(error));
     assert(capture != NULL);
+    assert(sn_capture_get_link_type(capture, &link_type));
+    assert(link_type == SN_PACKET_LINK_ETHERNET);
     assert(sn_capture_next(capture, &packet, error, sizeof(error)) == SN_CAPTURE_PACKET);
     assert(packet.data != NULL);
     assert(packet.captured_length == 14U);
@@ -76,10 +79,13 @@ static void test_offline_sll_preserves_link_type(void)
     char error[256] = {0};
     struct sn_capture_packet packet;
     struct sn_capture *capture;
+    enum sn_packet_link_type link_type = SN_PACKET_LINK_ETHERNET;
 
     create_test_pcap(path, sizeof(path), DLT_LINUX_SLL);
     capture = sn_capture_open_offline(path, error, sizeof(error));
     assert(capture != NULL);
+    assert(sn_capture_get_link_type(capture, &link_type));
+    assert(link_type == SN_PACKET_LINK_LINUX_SLL);
     assert(sn_capture_next(capture, &packet, error, sizeof(error)) == SN_CAPTURE_PACKET);
     assert(packet.link_type == SN_PACKET_LINK_LINUX_SLL);
     assert(packet.captured_length == 16U);

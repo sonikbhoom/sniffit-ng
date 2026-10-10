@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  sanitizer-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes cmake ninja-build libpcap-dev libncurses-dev
+      - name: Configure with sanitizers
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DSNIFFIT_NG_ENABLE_SANITIZERS=ON
+      - name: Build
+        run: cmake --build build --parallel 2
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  packet-fuzzer-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang cmake ninja-build libpcap-dev libncurses-dev
+      - name: Configure fuzzer
+        run: >-
+          cmake -S . -B build/fuzz -G Ninja
+          -DCMAKE_C_COMPILER=clang
+          -DSNIFFIT_NG_BUILD_PACKET_FUZZER=ON
+          -DBUILD_TESTING=OFF
+      - name: Build fuzzer
+        run: cmake --build build/fuzz --target fuzz_packet --parallel 2
+      - name: Run fuzz smoke test
+        run: ./build/fuzz/fuzz_packet -runs=20000 -max_len=2048

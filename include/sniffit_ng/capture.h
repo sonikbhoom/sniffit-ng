@@ -17,6 +17,9 @@ enum sn_capture_result {
 
 struct sn_capture;
 
+bool sn_capture_get_link_type(const struct sn_capture *capture,
+                              enum sn_packet_link_type *link_type);
+
 struct sn_capture_packet {
     const uint8_t *data;
     size_t captured_length;
@@ -44,6 +47,7 @@ bool sn_capture_set_nonblocking(
     size_t error_buffer_size);
 
 int sn_capture_selectable_fd(const struct sn_capture *capture);
+enum sn_packet_link_type sn_capture_link_type(const struct sn_capture *capture);
 
 /* Packet bytes are borrowed from libpcap until the next read or close. */
 enum sn_capture_result sn_capture_next(

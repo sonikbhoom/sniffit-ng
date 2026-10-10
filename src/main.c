@@ -1,6 +1,7 @@
 #include "sniffit_ng/capture.h"
 #include "sniffit_ng/config.h"
 #include "sniffit_ng/monitor.h"
+#include "sniffit_ng/pcap_writer.h"
 #include "sniffit_ng/payload_log.h"
 #include "sniffit_ng/privilege.h"
 #include "sniffit_ng/ui.h"
@@ -18,6 +19,7 @@ static void print_usage(FILE *stream, const char *program)
 {
     fprintf(stream, "Usage: %s --read-pcap FILE [--config FILE] [--inspect-payloads]\n", program);
     fprintf(stream, "       %s --interface DEVICE [--promiscuous] [--config FILE] [--inspect-payloads]\n", program);
+    fprintf(stream, "       %s [--read-pcap FILE|--interface DEVICE] --write-pcap FILE\n", program);
     fprintf(stream, "       %s [--read-pcap FILE|--interface DEVICE] --payload-logging [--payload-log FILE]\n", program);
     fprintf(stream, "       %s --help | --version\n", program);
 }
@@ -68,6 +70,7 @@ struct live_context {
     struct sn_capture *capture;
     struct sn_monitor *monitor;
     struct sn_payload_log *payload_log;
+    struct sn_pcap_writer *pcap_writer;
     char error[256];
 };
 
@@ -119,11 +122,20 @@ static enum sn_ui_poll_result poll_live_capture(void *context,
             }
             return SN_UI_POLL_STOPPED;
         }
+        if (live->pcap_writer != NULL &&
+            !sn_pcap_writer_write(live->pcap_writer, &packet)) {
+            (void)snprintf(live->error, sizeof(live->error),
+                           "Capture stopped: pcap write failed");
+            if (status != NULL) {
+                *status = live->error;
+            }
+            return SN_UI_POLL_STOPPED;
+        }
     }
     return updated ? SN_UI_POLL_UPDATED : SN_UI_POLL_IDLE;
 }
 
-static bool acknowledge_payload_logging(void)
+static bool acknowledge_capture_recording(void)
 {
     FILE *terminal = fopen("/dev/tty", "r+");
     bool accepted;
@@ -132,24 +144,28 @@ static bool acknowledge_payload_logging(void)
         if (terminal != NULL) {
             fclose(terminal);
         }
-        fprintf(stderr, "sniffit-ng: payload logging requires an interactive terminal for acknowledgment\n");
+        fprintf(stderr, "sniffit-ng: capture recording requires an interactive terminal for acknowledgment\n");
         return false;
     }
-    accepted = sn_payload_logging_confirm(terminal, terminal);
+    accepted = sn_capture_recording_confirm(terminal, terminal);
     fclose(terminal);
     return accepted;
 }
 
 static int replay_pcap(const char *path,
                        bool payload_logging_enabled,
+                       bool pcap_recording_enabled,
                        bool payload_inspection_enabled,
-                       const char *payload_log_path)
+                       const char *payload_log_path,
+                       const char *pcap_output_path)
 {
     char error[256] = {0};
     struct sn_capture_packet packet;
     struct sn_capture *capture;
     struct sn_payload_log *payload_log = NULL;
+    struct sn_pcap_writer *pcap_writer = NULL;
     struct sn_monitor monitor;
+    enum sn_packet_link_type link_type;
     enum sn_capture_result result;
     int status = 0;
 
@@ -159,10 +175,26 @@ static int replay_pcap(const char *path,
         return 1;
     }
 
+    if (pcap_recording_enabled) {
+        if (!sn_capture_get_link_type(capture, &link_type)) {
+            fprintf(stderr, "sniffit-ng: cannot determine capture link type\n");
+            sn_capture_close(capture);
+            return 1;
+        }
+        pcap_writer = sn_pcap_writer_open(pcap_output_path, link_type,
+                                          error, sizeof(error));
+        if (pcap_writer == NULL) {
+            fprintf(stderr, "sniffit-ng: cannot open pcap recording: %s\n", error);
+            sn_capture_close(capture);
+            return 1;
+        }
+    }
+
     if (payload_logging_enabled) {
         payload_log = sn_payload_log_open(payload_log_path, error, sizeof(error));
         if (payload_log == NULL) {
             fprintf(stderr, "sniffit-ng: cannot open payload log: %s\n", error);
+            (void)sn_pcap_writer_close(pcap_writer);
             sn_capture_close(capture);
             return 1;
         }
@@ -186,9 +218,18 @@ static int replay_pcap(const char *path,
             status = 1;
             break;
         }
+        if (pcap_writer != NULL && !sn_pcap_writer_write(pcap_writer, &packet)) {
+            fprintf(stderr, "sniffit-ng: failed writing pcap recording\n");
+            status = 1;
+            break;
+        }
     }
 
     sn_capture_close(capture);
+    if (!sn_pcap_writer_close(pcap_writer)) {
+        fprintf(stderr, "sniffit-ng: failed closing pcap recording\n");
+        status = 1;
+    }
     if (!sn_payload_log_close(payload_log)) {
         fprintf(stderr, "sniffit-ng: failed closing payload log\n");
         status = 1;
@@ -196,7 +237,8 @@ static int replay_pcap(const char *path,
     if (status != 0) {
         return status;
     }
-    return sn_ui_run(&monitor, payload_logging_enabled, payload_inspection_enabled,
+    return sn_ui_run(&monitor, payload_logging_enabled || pcap_recording_enabled,
+                     payload_inspection_enabled,
                      NULL, NULL);
 }
 
@@ -204,13 +246,16 @@ static int run_live_capture(const char *device,
                             bool promiscuous,
                             bool payload_logging_enabled,
                             bool payload_inspection_enabled,
-                            const char *payload_log_path)
+                            const char *payload_log_path,
+                            const char *pcap_output_path)
 {
     char error[256] = {0};
     struct sn_capture *capture;
     struct sn_payload_log *payload_log = NULL;
+    struct sn_pcap_writer *pcap_writer = NULL;
     struct sn_monitor monitor;
     struct live_context live;
+    enum sn_packet_link_type link_type;
     int ui_result;
 
     if (!sn_enable_capture_capability(error, sizeof(error))) {
@@ -230,6 +275,12 @@ static int run_live_capture(const char *device,
         (void)sn_drop_privileges_to_real_user(error, sizeof(error));
         return 1;
     }
+    if (!sn_capture_get_link_type(capture, &link_type)) {
+        fprintf(stderr, "sniffit-ng: cannot determine capture link type\n");
+        sn_capture_close(capture);
+        (void)sn_drop_privileges_to_real_user(error, sizeof(error));
+        return 1;
+    }
     if (!sn_drop_privileges_to_real_user(error, sizeof(error))) {
         fprintf(stderr, "sniffit-ng: refusing to process packets with elevated privileges: %s\n",
                 error);
@@ -245,18 +296,35 @@ static int run_live_capture(const char *device,
             return 1;
         }
     }
+    if (pcap_output_path != NULL) {
+        pcap_writer = sn_pcap_writer_open(pcap_output_path, link_type,
+                                          error, sizeof(error));
+        if (pcap_writer == NULL) {
+            fprintf(stderr, "sniffit-ng: cannot open pcap recording after privilege drop: %s\n",
+                    error);
+            (void)sn_payload_log_close(payload_log);
+            sn_capture_close(capture);
+            return 1;
+        }
+    }
 
     sn_monitor_init(&monitor, SN_FLOW_DEFAULT_IDLE_TIMEOUT_NS);
     sn_monitor_set_payload_inspection(&monitor, payload_inspection_enabled);
     live.capture = capture;
     live.monitor = &monitor;
     live.payload_log = payload_log;
+    live.pcap_writer = pcap_writer;
     live.error[0] = '\0';
-    ui_result = sn_ui_run(&monitor, payload_logging_enabled,
+    ui_result = sn_ui_run(&monitor, payload_logging_enabled || pcap_writer != NULL,
                           payload_inspection_enabled,
                           poll_live_capture, &live);
 
     sn_capture_close(capture);
+    if (!sn_pcap_writer_close(pcap_writer)) {
+        fprintf(stderr, "sniffit-ng: failed closing pcap recording\n");
+        (void)sn_payload_log_close(payload_log);
+        return 1;
+    }
     if (!sn_payload_log_close(payload_log)) {
         fprintf(stderr, "sniffit-ng: failed closing payload log\n");
         return 1;
@@ -267,6 +335,7 @@ static int run_live_capture(const char *device,
 int main(int argc, char **argv)
 {
     const char *pcap_path = NULL;
+    const char *pcap_output_path = NULL;
     const char *interface_name = NULL;
     const char *payload_log_path = NULL;
     const char *config_path = NULL;
@@ -295,6 +364,9 @@ int main(int argc, char **argv)
             promiscuous = true;
         } else if (strcmp(argv[index], "--payload-logging") == 0) {
             payload_logging_enabled = true;
+        } else if (strcmp(argv[index], "--write-pcap") == 0 && index + 1 < argc &&
+                   pcap_output_path == NULL) {
+            pcap_output_path = argv[++index];
         } else if (strcmp(argv[index], "--inspect-payloads") == 0) {
             payload_inspection_requested = true;
         } else if (strcmp(argv[index], "--config") == 0 && index + 1 < argc &&
@@ -331,8 +403,9 @@ int main(int argc, char **argv)
         fprintf(stderr,
                 "sniffit-ng: ICMP payload display enabled; inspect only authorized traffic and handle sensitive data ethically\n");
     }
-    if (payload_logging_enabled && !acknowledge_payload_logging()) {
-        fprintf(stderr, "sniffit-ng: payload logging was not acknowledged; refusing to continue\n");
+    if ((payload_logging_enabled || pcap_output_path != NULL) &&
+        !acknowledge_capture_recording()) {
+        fprintf(stderr, "sniffit-ng: capture recording was not acknowledged; refusing to continue\n");
         return 1;
     }
     if (payload_logging_enabled && payload_log_path == NULL) {
@@ -341,9 +414,11 @@ int main(int argc, char **argv)
 
     if (pcap_path != NULL) {
         return replay_pcap(pcap_path, payload_logging_enabled,
-                           payload_inspection_enabled, payload_log_path);
+                           pcap_output_path != NULL,
+                           payload_inspection_enabled, payload_log_path,
+                           pcap_output_path);
     }
     return run_live_capture(interface_name, promiscuous,
                             payload_logging_enabled, payload_inspection_enabled,
-                            payload_log_path);
+                            payload_log_path, pcap_output_path);
 }

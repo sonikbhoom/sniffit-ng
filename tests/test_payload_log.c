@@ -25,7 +25,7 @@ static void test_acknowledgment_is_exact(void)
     assert(input != NULL && output != NULL);
     assert(fprintf(input, "%s\n", SN_PAYLOAD_ACK_PHRASE) > 0);
     rewind(input);
-    assert(sn_payload_logging_confirm(input, output));
+    assert(sn_capture_recording_confirm(input, output));
     rewind(output);
     assert(fread(warning, 1U, sizeof(warning) - 1U, output) > 0U);
     assert(strstr(warning, "authorized") != NULL);
@@ -37,14 +37,14 @@ static void test_acknowledgment_is_exact(void)
     assert(input != NULL && output != NULL);
     fputs("yes\n", input);
     rewind(input);
-    assert(!sn_payload_logging_confirm(input, output));
+    assert(!sn_capture_recording_confirm(input, output));
     fclose(input);
     fclose(output);
 
     input = tmpfile();
     output = tmpfile();
     assert(input != NULL && output != NULL);
-    assert(!sn_payload_logging_confirm(input, output));
+    assert(!sn_capture_recording_confirm(input, output));
     fclose(input);
     fclose(output);
 }

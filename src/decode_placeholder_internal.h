@@ -19,15 +19,6 @@ static inline bool sn_decode_placeholder(const uint8_t *bytes,
     return false;
 }
 
-bool sn_decode_dns(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
-bool sn_decode_dhcp4(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
-bool sn_decode_tls(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
-bool sn_decode_quic(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
-bool sn_decode_rtp(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
-bool sn_decode_rtcp(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
-bool sn_decode_syslog(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
-bool sn_decode_radius(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
-bool sn_decode_tacacs(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
 bool sn_decode_icmpv6(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
 bool sn_decode_ndp(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
 bool sn_decode_dhcp6(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);

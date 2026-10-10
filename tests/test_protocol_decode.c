@@ -125,6 +125,315 @@ static void test_http_extension_is_disabled_by_default(void)
     assert(output[0] == '\0');
 }
 
+static void test_dns_udp_tcp_and_compression_bounds(void)
+{
+    static const uint8_t query[] = {
+        0x12U, 0x34U, 0x01U, 0x00U, 0x00U, 0x01U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U,
+        0x03U, 'w', 'w', 'w', 0x07U, 'e', 'x', 'a', 'm', 'p', 'l', 'e',
+        0x03U, 'c', 'o', 'm', 0x00U, 0x00U, 0x01U, 0x00U, 0x01U
+    };
+    uint8_t response[49] = {0};
+    uint8_t udp[8] = {0x30U, 0x39U, 0x00U, 0x35U, 0U, 0U, 0U, 0U};
+    uint8_t tcp[20] = {0};
+    uint8_t tcp_payload[2U + sizeof(query)] = {0};
+    uint8_t malformed[18] = {0};
+    struct sn_packet_view packet = {0};
+    char output[SN_PACKET_DECODE_TEXT_CAPACITY];
+
+    packet.protocol = 17U;
+    packet.transport = udp;
+    packet.transport_length = sizeof(udp) + sizeof(query);
+    packet.transport_header_present = true;
+    packet.payload = query;
+    packet.payload_length = sizeof(query);
+    udp[4] = 0U;
+    udp[5] = (uint8_t)packet.transport_length;
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "DNS query opcode=0 rcode=0 q=1 an=0 ns=0 ar=0") != NULL);
+    assert(strstr(output, "name=www.example.com type=A/1 class=1") != NULL);
+
+    memcpy(response, query, sizeof(query));
+    response[2] = 0x81U;
+    response[3] = 0x80U;
+    response[7] = 0x01U;
+    response[sizeof(query)] = 0xc0U;
+    response[sizeof(query) + 1U] = 0x0cU;
+    response[sizeof(query) + 3U] = 0x01U;
+    response[sizeof(query) + 5U] = 0x01U;
+    response[sizeof(query) + 9U] = 60U;
+    response[sizeof(query) + 11U] = 4U;
+    response[sizeof(query) + 12U] = 203U;
+    response[sizeof(query) + 13U] = 0U;
+    response[sizeof(query) + 14U] = 113U;
+    response[sizeof(query) + 15U] = 9U;
+    packet.transport_length = sizeof(udp) + sizeof(response);
+    udp[5] = (uint8_t)packet.transport_length;
+    packet.payload = response;
+    packet.payload_length = sizeof(response);
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "DNS response opcode=0 rcode=0 q=1 an=1") != NULL);
+    assert(strstr(output, "name=www.example.com type=A/1 class=1") != NULL);
+    assert(strstr(output, "203.0.113.9") == NULL);
+
+    malformed[5] = 0U;
+    malformed[5] = 1U;
+    malformed[12] = 0xc0U;
+    malformed[13] = 0x0cU;
+    malformed[15] = 1U;
+    malformed[17] = 1U;
+    udp[5] = (uint8_t)(sizeof(udp) + sizeof(malformed));
+    packet.transport_length = sizeof(udp) + sizeof(malformed);
+    packet.payload = malformed;
+    packet.payload_length = sizeof(malformed);
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "UDP 12345->53") != NULL);
+    assert(strstr(output, "DNS") == NULL);
+
+    tcp[0] = 0x30U;
+    tcp[1] = 0x39U;
+    tcp[2] = 0U;
+    tcp[3] = 53U;
+    tcp[12] = 0x50U;
+    tcp_payload[1] = (uint8_t)sizeof(query);
+    memcpy(tcp_payload + 2U, query, sizeof(query));
+    packet.protocol = 6U;
+    packet.transport = tcp;
+    packet.transport_length = sizeof(tcp) + sizeof(tcp_payload);
+    packet.payload = tcp_payload;
+    packet.payload_length = sizeof(tcp_payload);
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "DNS query opcode=0 rcode=0 q=1 an=0") != NULL);
+}
+
+static void test_dhcp4_discover_offer_and_malformed_options(void)
+{
+    uint8_t message[250] = {0};
+    uint8_t udp[8] = {0U, 68U, 0U, 67U, 1U, 0U, 0U, 0U};
+    struct sn_packet_view packet = {0};
+    char output[SN_PACKET_DECODE_TEXT_CAPACITY];
+
+    message[0] = 1U;
+    message[1] = 1U;
+    message[2] = 6U;
+    message[4] = 0x39U;
+    message[5] = 0x03U;
+    message[6] = 0xf3U;
+    message[7] = 0x26U;
+    memcpy(message + 28U, "\x00\x11\x22\x33\x44\x55", 6U);
+    message[236] = 99U;
+    message[237] = 130U;
+    message[238] = 83U;
+    message[239] = 99U;
+    message[240] = 53U;
+    message[241] = 1U;
+    message[242] = 1U;
+    message[243] = 55U;
+    message[244] = 2U;
+    message[245] = 1U;
+    message[246] = 3U;
+    message[247] = 255U;
+
+    packet.protocol = 17U;
+    packet.transport = udp;
+    packet.transport_length = sizeof(udp) + 248U;
+    packet.transport_header_present = true;
+    packet.payload = message;
+    packet.payload_length = 248U;
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "DHCPv4 Discover xid=0x3903f326 htype=1 chaddr=00:11:22:33:44:55") != NULL);
+    assert(strstr(output, "lease=0 options=2") != NULL);
+
+    message[242] = 2U;
+    message[243] = 51U;
+    message[244] = 4U;
+    message[245] = 0U;
+    message[246] = 0U;
+    message[247] = 14U;
+    message[248] = 16U;
+    message[249] = 255U;
+    packet.payload_length = sizeof(message);
+    packet.transport_length = sizeof(udp) + sizeof(message);
+    udp[5] = 2U;
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "DHCPv4 Offer") != NULL);
+    assert(strstr(output, "lease=3600 options=2") != NULL);
+
+    message[244] = 10U;
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "UDP 68->67") != NULL);
+    assert(strstr(output, "DHCPv4") == NULL);
+
+    packet.payload_length = 236U;
+    packet.transport_length = sizeof(udp) + packet.payload_length;
+    udp[4] = 0U;
+    udp[5] = 244U;
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "BOOTP request xid=0x3903f326") != NULL);
+}
+
+static void test_tls_record_metadata_on_tcp(void)
+{
+    uint8_t tcp[20] = {0U, 0U, 1U, 0xbbU};
+    uint8_t handshake[9] = {22U, 3U, 3U, 0U, 4U, 1U, 0U, 0U, 0U};
+    uint8_t application_data[8] = {23U, 3U, 3U, 0U, 3U, 's', 'e', 'c'};
+    struct sn_packet_view packet = {0};
+    char output[SN_PACKET_DECODE_TEXT_CAPACITY];
+
+    tcp[12] = 0x50U;
+    packet.protocol = 6U;
+    packet.transport = tcp;
+    packet.transport_header_present = true;
+    packet.payload = handshake;
+    packet.payload_length = sizeof(handshake);
+    packet.transport_length = sizeof(tcp) + sizeof(handshake);
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "TLS record=handshake version=0x0303 record-bytes=4") != NULL);
+    assert(strstr(output, "handshake=ClientHello") != NULL);
+    assert(strstr(output, "secret") == NULL);
+
+    packet.payload = application_data;
+    packet.payload_length = sizeof(application_data);
+    packet.transport_length = sizeof(tcp) + sizeof(application_data);
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "TLS record=application-data version=0x0303 record-bytes=3") != NULL);
+    assert(strstr(output, "sec") == NULL);
+
+    handshake[8] = 1U;
+    packet.payload = handshake;
+    packet.payload_length = sizeof(handshake);
+    packet.transport_length = sizeof(tcp) + sizeof(handshake);
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "TLS record=") == NULL);
+}
+
+static void test_rtp_rtcp_metadata_over_udp(void)
+{
+    uint8_t udp[8] = {0x4eU, 0x20U, 0x4eU, 0x21U, 0U, 0U, 0U, 0U};
+    uint8_t rtp[13] = {0x80U, 0xe0U, 0U, 5U, 0U, 0U, 0U, 9U,
+                       0x12U, 0x34U, 0x56U, 0x78U, 0xaaU};
+    uint8_t rtcp[8] = {0x81U, 200U, 0U, 1U, 0x12U, 0x34U, 0x56U, 0x78U};
+    struct sn_packet_view packet = {0};
+    char output[SN_PACKET_DECODE_TEXT_CAPACITY];
+
+    packet.protocol = 17U;
+    packet.transport = udp;
+    packet.transport_header_present = true;
+    packet.payload = rtp;
+    packet.payload_length = sizeof(rtp);
+    packet.transport_length = sizeof(udp) + sizeof(rtp);
+    udp[5] = (uint8_t)packet.transport_length;
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "RTP v2 pt=96 marker=1 seq=5 timestamp=9 ssrc=12345678 csrc=0 payload=1") != NULL);
+    assert(strstr(output, "aa") == NULL);
+
+    packet.payload = rtcp;
+    packet.payload_length = sizeof(rtcp);
+    packet.transport_length = sizeof(udp) + sizeof(rtcp);
+    udp[5] = (uint8_t)packet.transport_length;
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "RTCP SR count=1 bytes=8") != NULL);
+
+    rtp[0] = 0x8fU;
+    packet.payload = rtp;
+    packet.payload_length = 12U;
+    packet.transport_length = sizeof(udp) + packet.payload_length;
+    udp[5] = (uint8_t)packet.transport_length;
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "UDP 20000->20001") != NULL);
+    assert(strstr(output, "RTP v2") == NULL);
+}
+
+static void test_quic_invariant_header_on_udp(void)
+{
+    uint8_t udp[8] = {0x30U, 0x39U, 0x01U, 0xbbU, 0U, 18U, 0U, 0U};
+    uint8_t quic[10] = {0xc0U, 0U, 0U, 0U, 1U, 2U, 0xaaU, 0xbbU, 1U, 0xccU};
+    struct sn_packet_view packet = {0};
+    char output[SN_PACKET_DECODE_TEXT_CAPACITY];
+
+    packet.protocol = 17U;
+    packet.transport = udp;
+    packet.transport_length = sizeof(udp) + sizeof(quic);
+    packet.transport_header_present = true;
+    packet.payload = quic;
+    packet.payload_length = sizeof(quic);
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "QUIC v1 long-header type=0 version=0x00000001 dcid-len=2 scid-len=1") != NULL);
+    assert(strstr(output, "aabb") == NULL);
+
+    quic[5] = 20U;
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "UDP 12345->443") != NULL);
+    assert(strstr(output, "QUIC") == NULL);
+
+    quic[0] = 0x40U;
+    packet.payload_length = 8U;
+    udp[5] = 16U;
+    packet.transport_length = sizeof(udp) + packet.payload_length;
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "QUIC short-header payload=7") != NULL);
+}
+
+static void test_syslog_radius_tacacs_metadata(void)
+{
+    static const uint8_t syslog[] = "<34>Oct 11 22:14:15 host app: private message";
+    uint8_t radius[25] = {1U, 7U, 0U, 25U};
+    uint8_t udp[8] = {0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U};
+    uint8_t tcp[20] = {0U, 20000U >> 8, (uint8_t)20000U, 0U, 0U, 0U, 0U, 0U,
+                       0U, 0U, 0U, 0U, 0x50U};
+    uint8_t tacacs[16] = {0xc0U, 1U, 1U, 0x80U, 0x12U, 0x34U, 0x56U, 0x78U,
+                          0U, 0U, 0U, 4U, 's', 'e', 'c', 'r'};
+    struct sn_packet_view packet = {0};
+    char output[SN_PACKET_DECODE_TEXT_CAPACITY];
+
+    packet.protocol = 17U;
+    packet.transport = udp;
+    packet.transport_header_present = true;
+    packet.payload = syslog;
+    packet.payload_length = sizeof(syslog) - 1U;
+    packet.transport_length = sizeof(udp) + packet.payload_length;
+    udp[0] = 0x30U;
+    udp[1] = 0x39U;
+    udp[2] = 2U;
+    udp[3] = 2U;
+    udp[5] = (uint8_t)packet.transport_length;
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "Syslog PRI=34 facility=4 severity=2") != NULL);
+    assert(strstr(output, "private message") == NULL);
+
+    packet.payload = radius;
+    packet.payload_length = sizeof(radius);
+    packet.transport_length = sizeof(udp) + sizeof(radius);
+    udp[0] = (uint8_t)(1812U >> 8);
+    udp[1] = (uint8_t)1812U;
+    udp[2] = 0xc3U;
+    udp[3] = 0x50U;
+    udp[5] = (uint8_t)packet.transport_length;
+    radius[20] = 1U;
+    radius[21] = 5U;
+    radius[22] = 'p';
+    radius[23] = 'w';
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "RADIUS Access-Request id=7 bytes=25 attributes=1") != NULL);
+    assert(strstr(output, "pw") == NULL);
+
+    radius[21] = 9U;
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "UDP 1812->50000") != NULL);
+    assert(strstr(output, "RADIUS") == NULL);
+
+    packet.protocol = 6U;
+    packet.transport = tcp;
+    packet.transport_length = sizeof(tcp) + sizeof(tacacs);
+    packet.payload = tacacs;
+    packet.payload_length = sizeof(tacacs);
+    tcp[2] = 0U;
+    tcp[3] = 49U;
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "TACACS+ authentication version=0xc0 seq=1") != NULL);
+    assert(strstr(output, "secret") == NULL);
+}
+
 static void test_ntp_metadata_and_validation(void)
 {
     uint8_t ntp[48] = {0};
@@ -285,9 +594,7 @@ static void test_protocol_placeholders_are_inert(void)
 {
     typedef bool (*placeholder_decoder)(const uint8_t *, size_t, char *, size_t);
     static const placeholder_decoder decoders[] = {
-        sn_decode_dns, sn_decode_dhcp4, sn_decode_tls,
-        sn_decode_quic, sn_decode_rtp, sn_decode_rtcp, sn_decode_syslog,
-        sn_decode_radius, sn_decode_tacacs, sn_decode_icmpv6, sn_decode_ndp,
+        sn_decode_icmpv6, sn_decode_ndp,
         sn_decode_dhcp6, sn_decode_ospf3, sn_decode_ripng, sn_decode_arp,
         sn_decode_lldp, sn_decode_cdp, sn_decode_stp, sn_decode_rstp,
         sn_decode_lacp, sn_decode_bgp, sn_decode_ospf2, sn_decode_isis,
@@ -309,6 +616,12 @@ int main(void)
     test_tcp_and_udp_metadata();
     test_http_summaries_hide_paths_and_sensitive_headers();
     test_http_extension_is_disabled_by_default();
+    test_dns_udp_tcp_and_compression_bounds();
+    test_dhcp4_discover_offer_and_malformed_options();
+    test_tls_record_metadata_on_tcp();
+    test_rtp_rtcp_metadata_over_udp();
+    test_quic_invariant_header_on_udp();
+    test_syslog_radius_tacacs_metadata();
     test_ntp_metadata_and_validation();
     test_snmp_metadata_and_malformed_ber();
     test_igmp_vrrp_and_icmp();

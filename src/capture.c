@@ -11,6 +11,16 @@ struct sn_capture {
     enum sn_packet_link_type link_type;
 };
 
+bool sn_capture_get_link_type(const struct sn_capture *capture,
+                              enum sn_packet_link_type *link_type)
+{
+    if (capture == NULL || link_type == NULL) {
+        return false;
+    }
+    *link_type = capture->link_type;
+    return true;
+}
+
 static void copy_error(char *destination, size_t capacity, const char *message)
 {
     if (destination != NULL && capacity > 0U) {
@@ -132,6 +142,11 @@ int sn_capture_selectable_fd(const struct sn_capture *capture)
         return -1;
     }
     return pcap_get_selectable_fd(capture->handle);
+}
+
+enum sn_packet_link_type sn_capture_link_type(const struct sn_capture *capture)
+{
+    return capture == NULL ? SN_PACKET_LINK_ETHERNET : capture->link_type;
 }
 
 enum sn_capture_result sn_capture_next(
