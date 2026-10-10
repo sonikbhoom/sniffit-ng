@@ -26,4 +26,4 @@ This checklist records documented legacy behavior and the intended Sniffit NG di
 
 ## Initial Keys
 
-`j`/`k` and arrow keys navigate; F1-F4 or `1`-`4` set host/port masks; Enter opens selected-flow details; `n` toggles packet statistics; `r` resets current flow state; `q` exits or closes the selected detail/log view. Exact bindings may be refined after a usable curses prototype.
+`j`/`k` and arrow keys navigate; F1-F4 or `1`-`4` set host/port masks; Enter opens selected-flow details; Escape returns from details; `n` toggles packet statistics; `r` resets current flow state; `q` exits. Detail contents persist while capture polling continues until Escape is pressed.

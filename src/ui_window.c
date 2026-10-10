@@ -24,3 +24,8 @@ size_t sn_ui_window_start(size_t item_count,
     }
     return current_start;
 }
+
+bool sn_ui_detail_should_dismiss(int key)
+{
+    return key == 27;
+}

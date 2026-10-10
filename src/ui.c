@@ -270,64 +270,80 @@ static void set_port_filter(const char *prompt, bool *enabled, uint16_t *port)
     *enabled = value != 0UL;
 }
 
-static void show_details(const struct sn_flow *flow, bool payload_inspection_active)
+static void show_details(const struct sn_flow *flow,
+                         bool payload_inspection_active,
+                         sn_ui_poll_callback poll_capture,
+                         void *poll_context)
 {
     char endpoint_a[INET_ADDRSTRLEN] = "?";
     char endpoint_b[INET_ADDRSTRLEN] = "?";
     int row = 1;
+    int key;
+    bool capture_polling = poll_capture != NULL;
 
     (void)inet_ntop(AF_INET, flow->endpoints[0].ipv4,
                     endpoint_a, sizeof(endpoint_a));
     (void)inet_ntop(AF_INET, flow->endpoints[1].ipv4,
                     endpoint_b, sizeof(endpoint_b));
-    erase();
-    box(stdscr, 0, 0);
-    mvprintw(row, 3, "%s %s:%u <-> %s:%u", protocol_name(flow->protocol),
-             endpoint_a, flow->endpoints[0].port,
-             endpoint_b, flow->endpoints[1].port);
-    mvprintw(row + 2, 3, "Packets A>B / B>A: %llu / %llu",
-             (unsigned long long)flow->packets[0],
-             (unsigned long long)flow->packets[1]);
-    mvprintw(row + 3, 3, "Bytes A>B / B>A:   %llu / %llu",
-             (unsigned long long)flow->bytes[0],
-             (unsigned long long)flow->bytes[1]);
-    if (flow->protocol == 1U) {
-        if (flow->has_icmp_echo_sample) {
-            mvprintw(row + 5, 3, "ICMP Echo %s %s, id=%u, sequence=%u",
-                     flow->icmp_type == 8U ? "request" : "reply",
-                     flow->icmp_echo_direction == 0U ? "A>B" : "B>A",
-                     flow->icmp_identifier, flow->icmp_sequence);
-            if (payload_inspection_active) {
-                mvprintw(row + 6, 3, "Payload sample (%zu/%u bytes), hex and ASCII:",
-                         flow->icmp_payload_sample_length,
-                         SN_FLOW_ICMP_SAMPLE_CAPACITY);
-                for (size_t offset = 0U, line = 0U;
-                     offset < flow->icmp_payload_sample_length;
-                     offset += SN_ICMP_DISPLAY_ROW_BYTES, ++line) {
-                    char hex[SN_ICMP_DISPLAY_HEX_CAPACITY];
-                    char ascii[SN_ICMP_DISPLAY_ASCII_CAPACITY];
-                    size_t row_length = sn_icmp_format_payload_row(
-                        flow->icmp_payload_sample + offset,
-                        flow->icmp_payload_sample_length - offset,
-                        hex, sizeof(hex), ascii, sizeof(ascii));
+    for (;;) {
+        erase();
+        box(stdscr, 0, 0);
+        mvprintw(row, 3, "%s %s:%u <-> %s:%u", protocol_name(flow->protocol),
+                 endpoint_a, flow->endpoints[0].port,
+                 endpoint_b, flow->endpoints[1].port);
+        mvprintw(row + 2, 3, "Packets A>B / B>A: %llu / %llu",
+                 (unsigned long long)flow->packets[0],
+                 (unsigned long long)flow->packets[1]);
+        mvprintw(row + 3, 3, "Bytes A>B / B>A:   %llu / %llu",
+                 (unsigned long long)flow->bytes[0],
+                 (unsigned long long)flow->bytes[1]);
+        if (flow->protocol == 1U) {
+            if (flow->has_icmp_echo_sample) {
+                mvprintw(row + 5, 3, "ICMP Echo %s %s, id=%u, sequence=%u",
+                         flow->icmp_type == 8U ? "request" : "reply",
+                         flow->icmp_echo_direction == 0U ? "A>B" : "B>A",
+                         flow->icmp_identifier, flow->icmp_sequence);
+                if (payload_inspection_active) {
+                    mvprintw(row + 6, 3, "Payload sample (%zu/%u bytes), hex and ASCII:",
+                             flow->icmp_payload_sample_length,
+                             SN_FLOW_ICMP_SAMPLE_CAPACITY);
+                    for (size_t offset = 0U, line = 0U;
+                         offset < flow->icmp_payload_sample_length;
+                         offset += SN_ICMP_DISPLAY_ROW_BYTES, ++line) {
+                        char hex[SN_ICMP_DISPLAY_HEX_CAPACITY];
+                        char ascii[SN_ICMP_DISPLAY_ASCII_CAPACITY];
+                        size_t row_length = sn_icmp_format_payload_row(
+                            flow->icmp_payload_sample + offset,
+                            flow->icmp_payload_sample_length - offset,
+                            hex, sizeof(hex), ascii, sizeof(ascii));
 
-                    if (row_length == 0U) {
-                        break;
+                        if (row_length == 0U) {
+                            break;
+                        }
+                        mvprintw(row + 7 + (int)line, 3, "%04zu  %-47s |%s|",
+                                 offset, hex, ascii);
                     }
-                    mvprintw(row + 7 + (int)line, 3, "%04zu  %-47s |%s|",
-                             offset, hex, ascii);
                 }
+            } else if (payload_inspection_active) {
+                mvaddstr(row + 5, 3, "No ICMP Echo payload sample retained yet.");
+            } else {
+                mvaddstr(row + 5, 3,
+                         "Payload display is off; enable --inspect-payloads with an acknowledged config.");
             }
-        } else if (payload_inspection_active) {
-            mvaddstr(row + 5, 3, "No ICMP Echo payload sample retained yet.");
-        } else {
-            mvaddstr(row + 5, 3,
-                     "Payload display is off; enable --inspect-payloads with an acknowledged config.");
+        }
+        mvaddstr(LINES - 2, 3, "Press Escape to return");
+        refresh();
+        key = getch();
+        if (sn_ui_detail_should_dismiss(key)) {
+            break;
+        }
+        if (key == KEY_RESIZE) {
+            (void)resize_term(0, 0);
+        }
+        if (key == ERR && capture_polling && poll_capture(poll_context) != NULL) {
+            capture_polling = false;
         }
     }
-    mvaddstr(LINES - 2, 3, "Press any key to return");
-    refresh();
-    (void)getch();
 }
 
 static void reset_monitor(struct sn_monitor *monitor)
@@ -425,7 +441,8 @@ int sn_ui_run(struct sn_monitor *monitor,
         case '\n':
         case KEY_ENTER:
             if (flow_count > 0U) {
-                show_details(flows[selected], payload_inspection_active);
+                show_details(flows[selected], payload_inspection_active,
+                             poll_capture, poll_context);
             }
             break;
         case '1':

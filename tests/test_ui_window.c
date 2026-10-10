@@ -28,11 +28,21 @@ static void test_empty_and_out_of_range_inputs(void)
     assert(sn_ui_window_start(10U, 100U, 3U, 0U) == 7U);
 }
 
+static void test_detail_closes_only_on_escape(void)
+{
+    assert(!sn_ui_detail_should_dismiss('q'));
+    assert(!sn_ui_detail_should_dismiss('\n'));
+    assert(!sn_ui_detail_should_dismiss(' '));
+    assert(!sn_ui_detail_should_dismiss(-1));
+    assert(sn_ui_detail_should_dismiss(27));
+}
+
 int main(void)
 {
     test_selection_scrolls_down_and_up();
     test_resize_clamps_window();
     test_empty_and_out_of_range_inputs();
+    test_detail_closes_only_on_escape();
     puts("ui window tests passed");
     return 0;
 }
