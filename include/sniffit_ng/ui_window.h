@@ -11,10 +11,12 @@ struct sn_ui_flow_filter {
     bool destination_ip_enabled;
     bool source_port_enabled;
     bool destination_port_enabled;
+    bool protocol_enabled;
     uint8_t source_ip[4];
     uint8_t destination_ip[4];
     uint16_t source_port;
     uint16_t destination_port;
+    uint8_t protocol;
 };
 
 size_t sn_ui_window_start(size_t item_count,

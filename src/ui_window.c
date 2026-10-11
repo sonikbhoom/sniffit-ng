@@ -160,6 +160,9 @@ bool sn_ui_flow_matches(const struct sn_flow *flow,
     if (flow == NULL || filter == NULL) {
         return false;
     }
+    if (filter->protocol_enabled && flow->protocol != filter->protocol) {
+        return false;
+    }
     for (size_t source = 0U; source < 2U; ++source) {
         size_t destination = 1U - source;
         if (endpoint_matches(&flow->endpoints[source],

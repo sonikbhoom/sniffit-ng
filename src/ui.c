@@ -102,6 +102,8 @@ static void draw_filter_line(const struct sn_ui_flow_filter *filter)
 {
     char source[INET_ADDRSTRLEN] = "All";
     char destination[INET_ADDRSTRLEN] = "All";
+    const char *protocol = filter->protocol_enabled ?
+        protocol_name(filter->protocol) : "All";
 
     if (filter->source_ip_enabled) {
         (void)inet_ntop(AF_INET, filter->source_ip, source, sizeof(source));
@@ -109,13 +111,14 @@ static void draw_filter_line(const struct sn_ui_flow_filter *filter)
     if (filter->destination_ip_enabled) {
         (void)inet_ntop(AF_INET, filter->destination_ip, destination, sizeof(destination));
     }
-    mvprintw(LINES - 2, 0, "Source: %.15s:%s%u  Destination: %.15s:%s%u",
+    mvprintw(LINES - 2, 0, "Source: %.15s:%s%u  Destination: %.15s:%s%u  Protocol: %s",
              source,
              filter->source_port_enabled ? "" : "All/",
              filter->source_port_enabled ? filter->source_port : 0U,
              destination,
              filter->destination_port_enabled ? "" : "All/",
-             filter->destination_port_enabled ? filter->destination_port : 0U);
+             filter->destination_port_enabled ? filter->destination_port : 0U,
+             protocol);
     clrtoeol();
 }
 
@@ -318,7 +321,8 @@ static void draw_screen(struct sn_monitor *monitor,
     if (capture_status != NULL) {
         mvaddnstr(LINES - 1, 0, capture_status, COLS - 1);
     } else {
-        mvaddstr(LINES - 1, 0, " j/k move  1-4 filter  Enter details  n stats  r reset  q quit ");
+        mvaddstr(LINES - 1, 0,
+             " j/k move  1-5 filter  Enter details  n stats  r reset  q quit ");
     }
     clrtoeol();
     attroff(A_REVERSE);
@@ -382,6 +386,43 @@ static void set_port_filter(const char *prompt, bool *enabled, uint16_t *port,
     }
     *port = (uint16_t)value;
     *enabled = value != 0UL;
+}
+
+static bool parse_protocol_filter(const char *input, uint8_t *protocol)
+{
+    static const struct {
+        const char *name;
+        uint8_t number;
+    } options[] = {
+        {"tcp", 6U},
+        {"udp", 17U},
+        {"icmp", 1U},
+        {"igmp", 2U},
+        {"vrrp", 112U}
+    };
+
+    for (size_t index = 0U; index < sizeof(options) / sizeof(options[0]); ++index) {
+        if (strcasecmp(input, options[index].name) == 0) {
+            *protocol = options[index].number;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void set_protocol_filter(const char *prompt, bool *enabled,
+                                uint8_t *protocol, int input_timeout_ms)
+{
+    char input[32] = {0};
+
+    if (!read_line(prompt, input, sizeof(input), input_timeout_ms)) {
+        return;
+    }
+    if (input[0] == '\0' || strcasecmp(input, "all") == 0) {
+        *enabled = false;
+    } else if (parse_protocol_filter(input, protocol)) {
+        *enabled = true;
+    }
 }
 
 static bool same_flow_identity(const struct sn_flow *left, const struct sn_flow *right)
@@ -847,6 +888,7 @@ int sn_ui_run(struct sn_monitor *monitor,
         case 'r':
         case 'R':
             reset_monitor(monitor);
+            filter = (struct sn_ui_flow_filter){0};
             sn_monitor_rate_sampler_init(&rate_sampler);
             rates = (struct sn_monitor_rates){0};
             rates_ready = false;
@@ -888,6 +930,14 @@ int sn_ui_run(struct sn_monitor *monitor,
             set_port_filter("Destination port (0 for all): ",
                             &filter.destination_port_enabled, &filter.destination_port,
                             capture_polling ? 50 : -1);
+            selected = 0U;
+            scroll_start = 0U;
+            break;
+        case '5':
+        case KEY_F(5):
+            set_protocol_filter("Protocol (tcp, udp, icmp, igmp, vrrp or all): ",
+                                &filter.protocol_enabled, &filter.protocol,
+                                capture_polling ? 50 : -1);
             selected = 0U;
             scroll_start = 0U;
             break;

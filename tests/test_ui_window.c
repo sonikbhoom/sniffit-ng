@@ -85,6 +85,13 @@ static void test_flow_filter_direction_semantics(void)
 
     assert(sn_ui_flow_matches(&flow, &filter));
 
+    filter.protocol_enabled = true;
+    filter.protocol = 6U;
+    assert(sn_ui_flow_matches(&flow, &filter));
+    filter.protocol = 17U;
+    assert(!sn_ui_flow_matches(&flow, &filter));
+    filter.protocol_enabled = false;
+
     filter.source_ip_enabled = true;
     memcpy(filter.source_ip, flow.endpoints[0].ipv4, sizeof(filter.source_ip));
     assert(sn_ui_flow_matches(&flow, &filter));

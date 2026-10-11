@@ -50,7 +50,7 @@ At each inspection checkpoint, report: deliverable completed, exact command/test
 - **Local address cue:** When terminal colors are available, the selected interface's IPv4 and matching flow-address text use muted green. SSH/Telnet priority sessions remain muted red outside that address span. The selected row retains the standard reverse-video focus treatment without session/local color, avoiding color flicker during navigation; 256-color terminals receive muted palette shades, with basic-color fallback elsewhere.
 - **README screenshots:** Redacted monitor and inspection screenshots are linked in the README. Unredacted originals are ignored by Git.
 - **SSH/Telnet emphasis:** TCP sessions involving port 22 or 23 are highlighted in red and sorted to the top, regardless of direction.
-- **Current test status:** The non-sanitized `build/live` suite passed 18 tests; live loopback capture skipped because `CAP_NET_RAW` is not permitted. The last sanitizer-enabled run still crashed in `pcap_dump` while creating fixtures for `capture_offline` and `capture_pipeline`.
+- **Current test status:** The ASan/UBSan suite passed all 18 runnable tests; its live loopback test remains skipped because the sanitizer binary does not have `CAP_NET_RAW`. The non-sanitized loopback test passed separately after the user granted the capability to `build/live/test_capture_live`. Test targets explicitly keep assertions enabled under `NDEBUG`, preventing fixture setup calls inside assertions from disappearing in optimized builds.
 
 ## Initial Feature Policy
 
@@ -96,7 +96,7 @@ This is the canonical list of open project work. Add newly agreed TODOs here und
 
 | Status | Task |
 | --- | --- |
-| [ ] | Fix the sanitizer crashes in `capture_offline` and `capture_pipeline`, which currently fault in `pcap_dump` during test-pcap creation; then rerun the complete sanitizer suite. |
+| [x] | Fix sanitizer crashes in `capture_offline` and `capture_pipeline` caused by `NDEBUG` compiling out pcap fixture setup inside assertions; keep assertions enabled for test targets and rerun the complete sanitizer suite. |
 | [ ] | Manually verify the opt-in external-address lookup and its failure path on an authorized live interface. Keep this a manual check; tests must not contact third-party services. |
 | [ ] | Run multi-day soak tests for memory, CPU use, idle-flow expiry, and counter stability before claiming long-running readiness. |
 | [ ] | Expand corpus-backed fuzzing, malformed-pcap coverage, and privilege/capability tests across supported Linux environments. |
@@ -112,7 +112,7 @@ This is the canonical list of open project work. Add newly agreed TODOs here und
 | Status | Task |
 | --- | --- |
 | [ ] | Choose ICMP detail row width at startup from the terminal dimensions, using the available pane width while preserving aligned offsets and ASCII; define a readable fallback for narrow terminals. |
-| [ ] | Add quick protocol, local/remote port, and selected-flow filters. Clearly distinguish display-only filtering from capture filtering. |
+| [ ] | Add quick local/remote port and selected-flow filters. Protocol filtering is available on key `5`; `r` resets monitor state and clears active display filters. Clearly distinguish display-only filtering from capture filtering. |
 | [ ] | Add a focus mode for the selected flow or either endpoint host, with a shortcut to apply and clear focus; keep it distinct from source/destination filters and cover it with PTY interaction tests. |
 | [x] | Highlight TCP sessions involving port 22 or 23 in red and sort them to the top, regardless of traffic direction. |
 

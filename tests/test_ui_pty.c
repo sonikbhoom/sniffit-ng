@@ -146,6 +146,8 @@ int main(void)
     bool details_followed_highlight;
     bool source_filter_applied;
     bool source_filter_cleared;
+    bool protocol_filter_applied;
+    bool filters_cleared_by_reset;
 
     terminal_size.ws_row = 30U;
     terminal_size.ws_col = 120U;
@@ -229,7 +231,38 @@ int main(void)
     details_followed_highlight =
         read_until(master_fd, output, sizeof(output), &output_length,
                    "A 10.0.0.1:1234", 1000);
-    assert(write(master_fd, "qq", 2U) == 2);
+    output[0] = '\0';
+    output_length = 0U;
+    assert(write(master_fd, "q1", 2U) == 2);
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "host (IPv4 or all):", 1000));
+    assert(write(master_fd, "192.168.1.7\n", sizeof("192.168.1.7\n") - 1U) ==
+           (ssize_t)(sizeof("192.168.1.7\n") - 1U));
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "192.168.1.7:All/0", 1000));
+
+    output[0] = '\0';
+    output_length = 0U;
+    assert(write(master_fd, "5", 1U) == 1);
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "Protocol (tcp, udp, icmp, igmp, vrrp or all):", 1000));
+    assert(write(master_fd, "icmp\n", sizeof("icmp\n") - 1U) ==
+           (ssize_t)(sizeof("icmp\n") - 1U));
+    protocol_filter_applied = read_until(master_fd, output, sizeof(output),
+                                         &output_length, "Protocol: ICMP", 1000);
+    assert(protocol_filter_applied);
+
+    output[0] = '\0';
+    output_length = 0U;
+    assert(write(master_fd, "r", 1U) == 1);
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "All", 1000));
+    (void)read_until(master_fd, output, sizeof(output), &output_length,
+                     "__filter_input_probe__", 100);
+    filters_cleared_by_reset = count_occurrences(output, "All") >= 2U;
+    assert(filters_cleared_by_reset);
+
+    assert(write(master_fd, "q", 1U) == 1);
     assert(waitpid(child, &child_status, 0) == child);
     assert(WIFEXITED(child_status));
     assert(WEXITSTATUS(child_status) == 0);
@@ -239,6 +272,8 @@ int main(void)
     assert(new_flow_visible_while_open);
     assert(selected_counters_updated);
     assert(details_followed_highlight);
+    assert(protocol_filter_applied);
+    assert(filters_cleared_by_reset);
     puts("curses pty interaction test passed");
     return 0;
 }
