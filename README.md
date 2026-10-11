@@ -21,7 +21,7 @@ Use Sniffit NG only on systems and networks you own or have permission to monito
 
 These are summaries, not complete protocol decoders. IPv6 is not yet supported. TCP is not reassembled across packets, so a message split between packets may be missed. HTTPS contents are not decrypted. Sniffit limits how many connections and details it keeps in memory. Multi-day use still needs longer testing.
 
-Select a connection and press Enter to see details. Use arrow keys or `j`/`k` to move between connections. Keys `1` through `4` set source/destination address and port filters. These filters change what is displayed, not what is captured or counted. See the [development plan](PLAN.md) for upcoming filters, display improvements, and screenshots.
+Select a connection and press Enter to see details. Use arrow keys or `j`/`k` to move between connections. Keys `1` through `4` set source/destination address and port filters. These filters change what is displayed, not what is captured or counted. See the [development plan](PLAN.md) for planned filters and display improvements.
 
 This repository currently has no license. Public visibility does not itself grant permission to reuse, modify, or redistribute the code.
 

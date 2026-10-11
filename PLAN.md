@@ -44,7 +44,11 @@ At each inspection checkpoint, report: deliverable completed, exact command/test
 - **Linux cooked capture and live NTP:** The user confirmed live capture on `ppp0` (libpcap DLT_LINUX_SLL). `ntpdate -4 -q time.nrc.ca` succeeded against `132.246.11.227` at stratum 2; the curses detail pane showed one request/reply pair and decoded NTPv4 client/server metadata, including server precision `-25` and reference ID `84f60be9`.
 - **Gate status:** Offline and post-drop loopback capture gates passed. The user confirmed the live curses application now renders successfully with the capability-backed capture path. This closes the initial live UI bring-up gate; remaining parity interactions and longer-running capture behavior stay on the feature checklist.
 - **Rate panel:** A deterministic three-second packet/byte sampler is implemented and unit-tested. The user confirmed the live rate display check is complete; the temporary file capability was removed afterward.
-- **ICMP Enter details:** A right-side pane preserves the flow list on the left. Echo request/reply type, direction, identifier, sequence, and 64-byte hex/ASCII records append to a scrolling history as packets arrive; up to 16 records/flow are retained in memory. The pane does not repaint on idle polls and closes on any key. Config acknowledgment gates all payload retention; no payload is written to disk by this feature.
+- **ICMP Enter details:** A right-side pane preserves the flow list on the left. Echo request/reply type, direction, identifier, sequence, and 64-byte hex/ASCII records append to a scrolling history as packets arrive; up to 16 records/flow are retained in memory. The pane does not repaint on idle polls; navigation keys switch flows, and other keys close it. Config acknowledgment gates all payload retention; no payload is written to disk by this feature.
+- **Live inspection updates:** The detail pane now continues to refresh while capture runs, including new flows and updated counters. Selection remains tied to flow identity as sorting changes, and arrow navigation changes the inspected flow. A PTY regression covers these behaviors.
+- **Interface context:** Live mode shows the interface and local IPv4 in the title. External IPv4 lookup is default-off and makes one HTTPS request to ifconfig.io only when explicitly enabled for an RFC 1918 interface. The request has not been manually exercised; no external request is part of tests.
+- **README screenshots:** Redacted monitor and inspection screenshots are linked in the README. Unredacted originals are ignored by Git.
+- **Current test limitation:** Sanitizer tests `capture_offline` and `capture_pipeline` currently crash in `pcap_dump` while creating test pcaps; the other 16 tests passed in the latest run excluding those two, and the capability-dependent live loopback test was skipped.
 
 ## Initial Feature Policy
 
@@ -82,24 +86,40 @@ The user has explicitly authorized development and testing of live capture again
 - ICMP detail MVP: Enter now shows ICMP Echo request/reply type, identifier, sequence, and sanitized payload text when the config-backed inspection acknowledgment is active. Samples are limited to 64 bytes per flow and cleared when inspection is disabled.
 - Published Git milestone: public repository `sonikbhoom/sniffit-ng`, branch `main`; local work is pushed. The repository currently has no license, by user choice.
 
-## Remaining Refactor Work
+## Project TODO Checklist
 
-1. **LAN ping display:** Verified against authorized host `razorback` (`192.168.1.6`) with eight successful pings and live GUI confirmation. No broader LAN scan was performed.
-2. **Complete UI parity:** Flow-list scrolling/resize clamping, deterministic protocol/endpoint ordering, bounded TCP/UDP service hints, a split append-only inspection pane, and documented bidirectional host/port mask semantics are implemented with focused tests. Capture polling continues while details are open, and navigation keys switch the inspected flow without closing the pane. The initial list/details/mask/statistics/reset/quit workflow exists but is not full legacy parity.
-3. **Configuration and compatibility:** The bounded `inspect_payloads` config and exact ethics-marker validation are implemented. Remaining: add an explicitly mapped legacy CLI/config subset; preserve only validated semantics.
-4. **Output modes:** Safe pcap recording is implemented through `--write-pcap FILE` for live or offline capture. It preserves link type, caplen/wire length, and timestamps; creates a new mode-0600 file exclusively; and requires the interactive recording acknowledgment. Remaining: selected summary/dump modes. Keep cleartext payload output disabled unless the runtime acknowledgment policy is satisfied.
-5. **Hardening:** An opt-in Clang/libFuzzer target exercises raw and structured Ethernet/SLL IPv4 TCP/UDP/ICMP/IGMP/VRRP frames; a 20,000-run ASan/UBSan smoke pass found no faults. A Linux PTY integration test now exercises the curses list/detail/navigation/close/quit path without live capture. Remaining: sustained corpus-backed fuzzing, a broader malformed-pcap corpus, and privilege/capability tests across supported Linux environments. Ethernet and Linux cooked v1 (SLL) are supported; other link types are rejected pending explicit parser/tests.
-6. **CPack packaging:** CMake install rules and RPM/DEB CPack metadata are implemented. Both packages were generated and inspected; the DEB includes explicit runtime dependencies because `dpkg-shlibdeps` on Fedora has no Debian library database, and the RPM auto-requires runtime sonames. Both extracted binaries pass `--help`; the DEB also passed install/remove in a temporary dpkg root. RPM install/remove is still unverified because the isolated RPM transaction requires elevated privileges. Remaining: add CPack generation/content checks to CI, decide whether to publish packages while the project is unlicensed, and validate package install/remove on disposable Debian and RPM systems. Packages carry no `CAP_NET_RAW` file capabilities; post-install setup must remain separate and warn against capabilities on developer-writable binaries.
-7. **Release/hardening:** GitHub Actions now runs the sanitizer suite and a Clang/libFuzzer parser smoke test on pushes and pull requests. Remaining: broaden malformed-pcap/fuzz corpora, extend capability testing across Linux environments, and decide licensing before inviting reuse/contributions. The initial milestone is already published. Never grant file capabilities to a developer-writable binary for deployment.
-8. **Protocol decoding roadmap:** Active bounded modules now decode TCP, packet-local HTTP, DNS over UDP/TCP, DHCPv4/BOOTP, generic UDP, NTP, SNMP, TLS records, QUIC headers, RTP/RTCP, Syslog, RADIUS, TACACS+, ICMP, IGMP, and VRRP. Remaining entries below require IPv6 or non-IP link parsing. Each decoder must use bounded spans, emit metadata by default, and have malformed/truncated fixtures. Keep credentials, community strings, keys, and arbitrary payload hidden by default.
+This is the canonical list of open project work. Add newly agreed TODOs here under the matching category; remove or check off items when they are completed. Detailed decoder notes and constraints follow the checklist.
 
-### Monitoring Experience TODO
+### Functional
 
-- Add quick filters for protocol, specific local or remote ports, and a selected connection. Clearly label the difference between hiding rows in the display and filtering packets at capture time.
-- Keep always-on monitoring practical: run multi-day soak tests for memory, CPU use, stale-flow expiry, and stable counters; document results before claiming long-term readiness.
-- Add an optional threat-priority sort that moves explainable heuristic signals to the top of the list, such as unexpected inbound SSH/Telnet or validated command-and-control indicators. Show why a connection was prioritized; treat it as a lead to review, not proof of an attack or a verdict.
-- Add direction colors: blue for outbound traffic, green when both directions are observed, and red for inbound traffic with no reply seen. Determine direction from the local host/interface, not endpoint sort order, and provide text cues for terminals without color.
-- Add a small set of real, compressed screenshots to the README. Keep image files modest so the documentation stays quick to download.
+| Status | Task |
+| --- | --- |
+| [ ] | Fix the sanitizer crashes in `capture_offline` and `capture_pipeline`, which currently fault in `pcap_dump` during test-pcap creation; then rerun the complete sanitizer suite. |
+| [ ] | Manually verify the opt-in external-address lookup and its failure path on an authorized live interface. Keep this a manual check; tests must not contact third-party services. |
+| [ ] | Run multi-day soak tests for memory, CPU use, idle-flow expiry, and counter stability before claiming long-running readiness. |
+| [ ] | Expand corpus-backed fuzzing, malformed-pcap coverage, and privilege/capability tests across supported Linux environments. |
+| [ ] | Define and implement a small, explicitly mapped legacy CLI/config compatibility subset; preserve only validated, safe behavior. |
+| [ ] | Add selected summary/dump output modes. Keep payload output disabled unless its existing authorization and privacy gates are satisfied. |
+| [ ] | Add CPack generation/content checks to CI and verify install/remove on disposable Debian and RPM systems. RPM transaction testing and native Debian validation remain outstanding. |
+| [ ] | Decide on a project license before inviting reuse or distributing packages for general use. |
+
+### Interface Improvements
+
+| Status | Task |
+| --- | --- |
+| [ ] | Add quick protocol, local/remote port, and selected-flow filters. Clearly distinguish display-only filtering from capture filtering. |
+| [ ] | Add optional threat-priority sorting using explainable signals, move flagged flows toward the top, and show why each was prioritized. Treat signals as leads, not verdicts. |
+| [ ] | Add direction colors: blue outbound, green when both directions are observed, and red inbound without a reply. Determine direction from the local interface and provide text cues for monochrome terminals. |
+
+### Protocol Decoding Features
+
+| Status | Task |
+| --- | --- |
+| [ ] | Add bounded IPv6 parsing, then implement ICMPv6/Neighbor Discovery, DHCPv6, OSPFv3, and RIPng with malformed and truncated fixtures. |
+| [ ] | Add non-IP Ethernet/link-layer parsing for ARP, LLDP/CDP, STP/RSTP, and LACP before enabling their placeholder decoders. |
+| [ ] | Implement the remaining routing and gateway protocols: BGP, OSPFv2, IS-IS, RIP, HSRP, and GLBP, with their framing and parser prerequisites. |
+| [ ] | Implement bounded MPLS, GRE, IP-in-IP, VXLAN, and Geneve decoding/inner-frame dispatch with recursion and size limits. |
+| [ ] | Decide whether bounded TCP stream reassembly is in scope for packet-split protocol messages; if implemented, define per-flow memory/time limits and add adversarial fixtures. |
 
 ### Protocol Decoder Backlog
 
