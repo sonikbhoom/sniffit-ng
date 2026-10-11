@@ -17,11 +17,12 @@ Use Sniffit NG only on systems and networks you own or have permission to monito
 - Live capture and saved pcap files on Ethernet and Linux cooked v1 (SLL) links.
 - IPv4 connections, packet counts, traffic rates, address and port filters, and packet error counts.
 - Short summaries for TCP, UDP, HTTP/1.x, TLS records, DNS, DHCPv4/BOOTP, NTP, SNMP, Syslog, RADIUS, TACACS+, QUIC, RTP/RTCP, ICMP, IGMP, and VRRP.
-- A terminal view with connection details and basic source/destination filters.
+- A terminal view with connection details, basic source/destination filters, and configurable TCP/UDP priority ports.
+- Per-flow detail-pane security advisories for recognized cleartext or unauthenticated services, kept separate from protocol summaries.
 
 These are summaries, not complete protocol decoders. IPv6 is not yet supported. TCP is not reassembled across packets, so a message split between packets may be missed. HTTPS contents are not decrypted. Sniffit limits how many connections and details it keeps in memory. Multi-day use still needs longer testing.
 
-Select a connection and press Enter to see details. Use arrow keys or `j`/`k` to move between connections. Keys `1` through `4` set source/destination address and port filters. These filters change what is displayed, not what is captured or counted. In live mode, the interface IPv4 and matching flow addresses use muted green when supported; TCP connections involving port 22 (SSH) or 23 (Telnet) are highlighted in muted red and sorted to the top, regardless of traffic direction. The selected row keeps the normal focus highlight. See the [development plan](PLAN.md) for planned filters and protocol work.
+Select a connection and press Enter to see details. Use arrow keys or `j`/`k` to move between connections. Keys `1` through `4` set source/destination address and port filters. These filters change what is displayed, not what is captured or counted. In live mode, the interface IPv4 and matching flow addresses use muted green when supported. Ports in `ui_priority` are highlighted red when either endpoint matches, including on the selected row; priority flows sort first, then by total observed bytes descending, with endpoint order as a deterministic tie-break. The default priority list is `22/tcp,23/tcp`; see the configuration section below to customize it. The local-address cue yields to priority red, while non-priority selected rows retain the normal focus highlight. See the [development plan](PLAN.md) for planned filters and protocol work.
 
 This repository currently has no license. Public visibility does not itself grant permission to reuse, modify, or redistribute the code.
 
@@ -37,6 +38,8 @@ ctest --test-dir build --output-on-failure
 ./build/sniffit-ng --read-pcap capture.pcap
 sudo ./build/sniffit-ng --interface lo
 ```
+
+For repeatable long-running memory and load checks, see the [stability-testing procedure](docs/stability-testing.md).
 
 To record packets from an offline replay or live interface to a new pcap file, use `--write-pcap FILE`. Since a pcap retains complete packet contents, recording requires the interactive privacy/authorization acknowledgment. The file is created exclusively with owner-only permissions; existing files and symlinks are rejected. Live output is opened only after capture privileges are dropped.
 
@@ -110,7 +113,7 @@ Set `ui_priority` to a comma-separated list of protocol-qualified ports, for exa
 
 ### Decoder Modes and Extensions
 
-`show_raw_flows = true` adds bounded IPv4 metadata flows for protocols without a built-in summary; it does not display packet bytes. Decoder keys accept `simplified` or `raw` for the currently dispatched modules: `icmp`, `igmp`, `tcp`, `http`, `telnet`, `dns`, `tls`, `tacacs`, `syslog`, `udp`, `dhcp4`, `snmp`, `ntp`, `quic`, `rtp`, `rtcp`, `radius`, and `vrrp`. Modes default to `simplified` and are selected at runtime through config. Researcher-supplied HTTP and protocol extensions are included at build time and require `tainted_extensions = true` for every protocol; this is explicit opt-in, not sandboxing. `show_raw_flows` and built-in summaries do not require taint opt-in. Decoder summaries include protocol-level security advisories for services such as Telnet, DNS, NTP, ICMP, SNMPv1/v2c, and RADIUS. These advisories describe protocol or service risks, not the security of every deployment.
+`show_raw_flows = true` adds bounded IPv4 metadata flows for protocols without a built-in summary; it does not display packet bytes. Decoder keys accept `simplified` or `raw` for the currently dispatched modules: `icmp`, `igmp`, `tcp`, `http`, `telnet`, `dns`, `tls`, `tacacs`, `syslog`, `udp`, `dhcp4`, `snmp`, `ntp`, `quic`, `rtp`, `rtcp`, `radius`, and `vrrp`. Modes default to `simplified` and are selected at runtime through config. Researcher-supplied HTTP and protocol extensions are included at build time and require `tainted_extensions = true` for every protocol; this is explicit opt-in, not sandboxing. `show_raw_flows` and built-in summaries do not require taint opt-in. When a recognized service has a cleartext or unauthenticated risk, the flow detail pane presents a bounded security advisory separately from decoded protocol summaries. Examples include HTTP, DNS, Telnet, NTP, ICMP, SNMPv1/v2c, and RADIUS. Advisories describe protocol or service risks, not the security of every deployment.
 
 Researchers can provide a source file at build time with `-DSNIFFIT_NG_CUSTOM_PROTOCOL_DECODER_SOURCE=/path/to/decoder.c`. It must implement `sn_protocol_decode_extension` from `include/sniffit_ng/protocol_decode_extension.h`. The callback receives a read-only, length-bounded IPv4 packet view and returns bounded text that the core sanitizes before display. This is static linking, not a sandbox: compiled extensions can inspect packet data and run with the process user's privileges. The separate built-in payload-inspection setting does not constrain researcher extensions. No researcher decoder or exploit code is included in this project.
 
