@@ -19,6 +19,10 @@ bool sn_decode_tcp(const struct sn_packet_view *packet,
                    char *output,
                    size_t output_capacity,
                    bool tainted_extensions);
+bool sn_decode_telnet(const uint8_t *bytes,
+                      size_t length,
+                      char *output,
+                      size_t output_capacity);
 bool sn_decode_http(const uint8_t *bytes,
                     size_t length,
                     char *output,

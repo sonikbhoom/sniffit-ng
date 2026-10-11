@@ -16,10 +16,14 @@ struct sn_ui_priority_port {
 
 #define SN_CONFIG_PAYLOAD_ACK_COMMENT \
     "## User has acknowledged to behave ethically and inspect only authorized traffic."
+#define SN_CONFIG_FULL_DECODE_ACK_COMMENT \
+    "## User acknowledges Telnet hex display can expose credentials and private traffic."
 
 struct sn_app_config {
     bool inspect_payloads;
     bool payload_display_acknowledged;
+    bool full_decode;
+    bool full_decode_acknowledged;
     bool resolve_external_addr;
     bool show_raw_flows;
     bool tainted_extensions;
@@ -35,7 +39,7 @@ bool sn_config_load_file(const char *path,
                          char *error_buffer,
                          size_t error_buffer_size);
 
-bool sn_config_validate_payload_inspection(
+bool sn_config_validate_inspection_options(
     const struct sn_app_config *config,
     char *error_buffer,
     size_t error_buffer_size);

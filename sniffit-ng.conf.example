@@ -2,6 +2,12 @@
 # Payload inspection is disabled unless explicitly enabled.
 inspect_payloads = false
 
+# Full Decode shows complete captured packet bytes for TCP/23 flows in hex.
+# It retains at most 8 recent frames in memory and may expose credentials.
+full_decode = false
+# To enable, make this exact acknowledgment active as well.
+# ## User acknowledges Telnet hex display can expose credentials and private traffic.
+
 # External IP lookup is disabled unless explicitly enabled. If the selected
 # interface has an RFC 1918 IPv4 address, enabling this sends one HTTPS request
 # to ifconfig.io when live capture starts.

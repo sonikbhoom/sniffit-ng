@@ -1,6 +1,7 @@
 #include "sniffit_ng/monitor.h"
 
 #include <limits.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define NANOSECONDS_PER_SECOND 1000000000ULL
@@ -71,6 +72,129 @@ void sn_monitor_init(struct sn_monitor *monitor, uint64_t idle_timeout_ns)
     }
     memset(monitor, 0, sizeof(*monitor));
     sn_flow_table_init(&monitor->flows, idle_timeout_ns);
+}
+
+bool sn_monitor_set_full_decode(struct sn_monitor *monitor, bool enabled)
+{
+    if (monitor == NULL) {
+        return false;
+    }
+    if (enabled) {
+        if (monitor->full_decode_records == NULL) {
+            monitor->full_decode_records = calloc(
+                SN_MONITOR_FULL_DECODE_HISTORY_CAPACITY,
+                sizeof(*monitor->full_decode_records));
+            if (monitor->full_decode_records == NULL) {
+                return false;
+            }
+        }
+        monitor->full_decode_enabled = true;
+        return true;
+    }
+    sn_monitor_clear_full_decode(monitor);
+    free(monitor->full_decode_records);
+    monitor->full_decode_records = NULL;
+    monitor->full_decode_enabled = false;
+    return true;
+}
+
+void sn_monitor_clear_full_decode(struct sn_monitor *monitor)
+{
+    if (monitor == NULL) {
+        return;
+    }
+    if (monitor->full_decode_records != NULL) {
+        memset(monitor->full_decode_records, 0,
+               SN_MONITOR_FULL_DECODE_HISTORY_CAPACITY *
+                   sizeof(*monitor->full_decode_records));
+    }
+    monitor->full_decode_next = 0U;
+    monitor->full_decode_count = 0U;
+    monitor->full_decode_sequence = 0U;
+}
+
+void sn_monitor_destroy(struct sn_monitor *monitor)
+{
+    if (monitor == NULL) {
+        return;
+    }
+    sn_monitor_clear_full_decode(monitor);
+    free(monitor->full_decode_records);
+    monitor->full_decode_records = NULL;
+    monitor->full_decode_enabled = false;
+}
+
+size_t sn_monitor_full_decode_count(const struct sn_monitor *monitor)
+{
+    return monitor == NULL ? 0U : monitor->full_decode_count;
+}
+
+const struct sn_full_decode_record *sn_monitor_full_decode_at(
+    const struct sn_monitor *monitor,
+    size_t chronological_index)
+{
+    size_t oldest;
+
+    if (monitor == NULL || chronological_index >= monitor->full_decode_count ||
+        monitor->full_decode_records == NULL) {
+        return NULL;
+    }
+    oldest = (monitor->full_decode_next +
+              SN_MONITOR_FULL_DECODE_HISTORY_CAPACITY -
+              monitor->full_decode_count) % SN_MONITOR_FULL_DECODE_HISTORY_CAPACITY;
+    return &monitor->full_decode_records[
+        (oldest + chronological_index) % SN_MONITOR_FULL_DECODE_HISTORY_CAPACITY];
+}
+
+static void store_full_decode_record(struct sn_monitor *monitor,
+                                     const struct sn_capture_packet *packet,
+                                     const struct sn_packet_view *view,
+                                     const struct sn_flow *flow)
+{
+    struct sn_full_decode_record *record;
+    uint16_t source_port;
+    uint16_t destination_port;
+    size_t stored_length;
+
+    if (!monitor->full_decode_enabled || monitor->full_decode_records == NULL ||
+        view->protocol != 6U || !view->transport_header_present ||
+        view->transport_length < 4U || flow == NULL) {
+        return;
+    }
+    source_port = (uint16_t)(((uint16_t)view->transport[0] << 8) |
+                             view->transport[1]);
+    destination_port = (uint16_t)(((uint16_t)view->transport[2] << 8) |
+                                  view->transport[3]);
+    if (source_port != 23U && destination_port != 23U) {
+        return;
+    }
+
+    record = &monitor->full_decode_records[monitor->full_decode_next];
+    memset(record, 0, sizeof(*record));
+    record->active = true;
+    record->endpoints[0] = flow->endpoints[0];
+    record->endpoints[1] = flow->endpoints[1];
+    if (monitor->full_decode_sequence < UINT64_MAX) {
+        ++monitor->full_decode_sequence;
+    }
+    record->sequence = monitor->full_decode_sequence;
+    record->timestamp = packet->timestamp;
+    record->link_type = packet->link_type;
+    record->captured_length = packet->captured_length;
+    record->wire_length = packet->wire_length;
+    stored_length = packet->captured_length;
+    if (stored_length > SN_MONITOR_FULL_DECODE_PACKET_CAPACITY) {
+        stored_length = SN_MONITOR_FULL_DECODE_PACKET_CAPACITY;
+    }
+    record->stored_length = stored_length;
+    if (stored_length > 0U) {
+        memcpy(record->bytes, packet->data, stored_length);
+    }
+    monitor->full_decode_next =
+        (monitor->full_decode_next + 1U) % SN_MONITOR_FULL_DECODE_HISTORY_CAPACITY;
+    if (monitor->full_decode_count < SN_MONITOR_FULL_DECODE_HISTORY_CAPACITY) {
+        ++monitor->full_decode_count;
+    }
 }
 
 void sn_monitor_set_payload_inspection(struct sn_monitor *monitor, bool enabled)
@@ -232,6 +356,8 @@ enum sn_monitor_result sn_monitor_process(
         increment_saturated(&monitor->stats.invalid_packets);
         return SN_MONITOR_INVALID;
     }
+
+    store_full_decode_record(monitor, packet, &view, flow);
 
     switch (flow_result) {
     case SN_FLOW_CREATED:

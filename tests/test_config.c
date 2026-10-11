@@ -55,6 +55,8 @@ static void test_payload_inspection_defaults_off(void)
     assert(sn_config_load_file(path, &config, error, sizeof(error)));
     assert(!config.inspect_payloads);
     assert(!config.payload_display_acknowledged);
+    assert(!config.full_decode);
+    assert(!config.full_decode_acknowledged);
     assert(!config.resolve_external_addr);
     assert(!config.show_raw_flows);
     assert(!config.tainted_extensions);
@@ -66,6 +68,26 @@ static void test_payload_inspection_defaults_off(void)
     for (size_t index = 0U; index < SN_DECODER_MODULE_COUNT; ++index) {
         assert(config.decoder_modes[index] == SN_DECODER_SIMPLIFIED);
     }
+    assert(unlink(path) == 0);
+}
+
+static void test_full_decode_requires_specific_ack(void)
+{
+    char path[80];
+    char error[256] = {0};
+    struct sn_app_config config;
+
+    write_config_file(path, "full_decode = true\n");
+    assert(!sn_config_load_file(path, &config, error, sizeof(error)));
+    assert(strstr(error, "full_decode") != NULL);
+    assert(unlink(path) == 0);
+
+    write_config_file(path,
+        "full_decode = true\n"
+        SN_CONFIG_FULL_DECODE_ACK_COMMENT "\n");
+    assert(sn_config_load_file(path, &config, error, sizeof(error)));
+    assert(config.full_decode);
+    assert(config.full_decode_acknowledged);
     assert(unlink(path) == 0);
 }
 
@@ -225,6 +247,7 @@ int main(void)
 {
     test_payload_inspection_requires_recorded_ack();
     test_payload_inspection_defaults_off();
+    test_full_decode_requires_specific_ack();
     test_ui_priority_ports_parse_tcp_and_udp();
     test_ui_priority_ports_reject_invalid_entries();
     test_external_address_lookup_is_opt_in();

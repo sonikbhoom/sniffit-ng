@@ -120,7 +120,7 @@ void sn_config_init(struct sn_app_config *config)
     }
 }
 
-bool sn_config_validate_payload_inspection(
+bool sn_config_validate_inspection_options(
     const struct sn_app_config *config,
     char *error_buffer,
     size_t error_buffer_size)
@@ -132,6 +132,12 @@ bool sn_config_validate_payload_inspection(
     if (config->inspect_payloads && !config->payload_display_acknowledged) {
         set_error(error_buffer, error_buffer_size,
                   "inspect_payloads requires the active ethical acknowledgment comment", 0U);
+        return false;
+    }
+    if (config->full_decode && !config->full_decode_acknowledged) {
+        set_error(error_buffer, error_buffer_size,
+                  "full_decode requires the active sensitive-data acknowledgment comment",
+                  0U);
         return false;
     }
     if (error_buffer != NULL && error_buffer_size > 0U) {
@@ -149,6 +155,7 @@ bool sn_config_load_file(const char *path,
     char line[CONFIG_LINE_CAPACITY];
     size_t line_number = 0U;
     bool inspect_setting_seen = false;
+    bool full_decode_setting_seen = false;
     bool external_address_setting_seen = false;
     bool raw_flows_setting_seen = false;
     bool tainted_extensions_setting_seen = false;
@@ -185,6 +192,10 @@ bool sn_config_load_file(const char *path,
             config->payload_display_acknowledged = true;
             continue;
         }
+        if (strcmp(text, SN_CONFIG_FULL_DECODE_ACK_COMMENT) == 0) {
+            config->full_decode_acknowledged = true;
+            continue;
+        }
         if (text[0] == '#') {
             continue;
         }
@@ -208,6 +219,19 @@ bool sn_config_load_file(const char *path,
                     fclose(stream);
                     set_error(error_buffer, error_buffer_size,
                               "inspect_payloads must be true or false", line_number);
+                    return false;
+                }
+            } else if (strcmp(key, "full_decode") == 0 &&
+                       !full_decode_setting_seen) {
+                full_decode_setting_seen = true;
+                if (strcmp(value, "true") == 0) {
+                    config->full_decode = true;
+                } else if (strcmp(value, "false") == 0) {
+                    config->full_decode = false;
+                } else {
+                    fclose(stream);
+                    set_error(error_buffer, error_buffer_size,
+                              "full_decode must be true or false", line_number);
                     return false;
                 }
             } else if (strcmp(key, "resolve_external_addr") == 0 &&
@@ -295,5 +319,6 @@ bool sn_config_load_file(const char *path,
         return false;
     }
     fclose(stream);
-    return sn_config_validate_payload_inspection(config, error_buffer, error_buffer_size);
+    return sn_config_validate_inspection_options(config, error_buffer,
+                                                 error_buffer_size);
 }

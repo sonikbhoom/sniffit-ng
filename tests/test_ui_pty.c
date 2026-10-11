@@ -15,6 +15,64 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+static void write_be16(uint8_t *bytes, uint16_t value)
+{
+    bytes[0] = (uint8_t)(value >> 8);
+    bytes[1] = (uint8_t)(value & 0xffU);
+}
+
+static void seed_full_decode(struct sn_monitor *monitor)
+{
+    struct sn_full_decode_record *record;
+    uint8_t *ip;
+    uint8_t *tcp;
+
+    assert(sn_monitor_set_full_decode(monitor, true));
+    record = &monitor->full_decode_records[0];
+    record->active = true;
+    record->endpoints[0] = monitor->flows.entries[0].endpoints[0];
+    record->endpoints[1] = monitor->flows.entries[0].endpoints[1];
+    record->sequence = 1U;
+    record->timestamp.tv_sec = 1700000000;
+    record->timestamp.tv_usec = 123456;
+    record->link_type = SN_PACKET_LINK_ETHERNET;
+    record->captured_length = 57U;
+    record->wire_length = 57U;
+    record->stored_length = 57U;
+    record->bytes[6] = 0x02U;
+    record->bytes[11] = 0x01U;
+    write_be16(record->bytes + 12U, 0x0800U);
+    ip = record->bytes + 14U;
+    ip[0] = 0x45U;
+    write_be16(ip + 2U, 43U);
+    ip[8] = 64U;
+    ip[9] = 6U;
+    ip[12] = 152U;
+    ip[13] = 2U;
+    ip[14] = 23U;
+    ip[15] = 104U;
+    ip[16] = 192U;
+    ip[17] = 168U;
+    ip[18] = 1U;
+    ip[19] = 7U;
+    tcp = ip + 20U;
+    write_be16(tcp, 40000U);
+    write_be16(tcp + 2U, 23U);
+    tcp[4] = 0x01U;
+    tcp[5] = 0x02U;
+    tcp[6] = 0x03U;
+    tcp[7] = 0x04U;
+    tcp[12] = 0x50U;
+    tcp[13] = 0x02U;
+    write_be16(tcp + 14U, 0x4000U);
+    tcp[20] = 0xffU;
+    tcp[21] = 0xfdU;
+    tcp[22] = 0x01U;
+    monitor->full_decode_next = 1U;
+    monitor->full_decode_count = 1U;
+    monitor->full_decode_sequence = 1U;
+}
+
 static void seed_flows(struct sn_monitor *monitor)
 {
     struct sn_flow *first = &monitor->flows.entries[0];
@@ -31,7 +89,7 @@ static void seed_flows(struct sn_monitor *monitor)
     first->endpoints[1].ipv4[1] = 168U;
     first->endpoints[1].ipv4[2] = 1U;
     first->endpoints[1].ipv4[3] = 7U;
-    first->endpoints[1].port = 22U;
+    first->endpoints[1].port = 23U;
     first->packets[0] = 1U;
     (void)snprintf(first->security_advisory, sizeof(first->security_advisory),
                    "SECURITY: unencrypted and unauthenticated diagnostic traffic");
@@ -74,6 +132,20 @@ static enum sn_ui_poll_result inject_new_flow(void *opaque, const char **status)
 
     context->injected = true;
     selected->packets[0] = 2U;
+    if (context->monitor->full_decode_enabled) {
+        struct sn_full_decode_record *previous =
+            &context->monitor->full_decode_records[0];
+        struct sn_full_decode_record *next =
+            &context->monitor->full_decode_records[1];
+
+        *next = *previous;
+        next->sequence = 2U;
+        next->bytes[55] = 0xfbU;
+        next->bytes[56] = 0x03U;
+        context->monitor->full_decode_next = 2U;
+        context->monitor->full_decode_count = 2U;
+        context->monitor->full_decode_sequence = 2U;
+    }
     *new_flow = (struct sn_flow){0};
     new_flow->active = true;
     new_flow->protocol = 6U;
@@ -153,6 +225,7 @@ int main(void)
     bool source_filter_cleared;
     bool protocol_filter_applied;
     bool filters_cleared_by_reset;
+    bool new_full_decode_visible_while_open;
 
     terminal_size.ws_row = 30U;
     terminal_size.ws_col = 80U;
@@ -178,23 +251,30 @@ int main(void)
         (void)setenv("TERM", "xterm-256color", 1);
         sn_monitor_init(&monitor, UINT64_MAX);
         seed_flows(&monitor);
+        seed_full_decode(&monitor);
         poll_context = (struct ui_poll_context){
             .monitor = &monitor,
             .trigger_fd = trigger_pipe[0]
         };
-        _exit(sn_ui_run(&monitor, &network_info, false, false,
-                priority_ports, sizeof(priority_ports) / sizeof(priority_ports[0]),
-                inject_new_flow, &poll_context));
+        int result = sn_ui_run(&monitor, &network_info, false, false,
+                       priority_ports,
+                       sizeof(priority_ports) / sizeof(priority_ports[0]),
+                       inject_new_flow, &poll_context);
+        sn_monitor_destroy(&monitor);
+        _exit(result);
     }
 
     (void)close(trigger_pipe[0]);
     assert(read_until(master_fd, output, sizeof(output), &output_length,
                       "ppp0 ", 1000));
     assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "FULL TELNET HEX", 1000));
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
                       "192.168.1.7", 1000));
     assert(strstr(output, "external 203.0.113.7") != NULL);
     assert(read_until(master_fd, output, sizeof(output), &output_length,
                       "q quit", 1000));
+    assert(strstr(output, "<->") != NULL);
     assert(count_occurrences(output, "\033[38;5;65m") == 1U);
     assert(strstr(output, "\033[38;5;131m") != NULL);
     assert(strstr(output, "DIRECTION") == NULL);
@@ -230,6 +310,18 @@ int main(void)
     assert(write(master_fd, "\n", 1U) == 1);
     details_opened = read_until(master_fd, output, sizeof(output), &output_length,
                                 "TCP flow", 1000);
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "FULL TELNET HEX", 1000));
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "152.2.23.104:40000", 1000));
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "flags=0x02 ns=0 [SYN]", 1000));
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "ns=0", 1000));
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "IP source is unauthenticated", 1000));
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "ff fd 01", 1000));
         assert(read_until(master_fd, output, sizeof(output), &output_length,
                  "SECURITY: unencrypted and", 1000));
         assert(read_until(master_fd, output, sizeof(output), &output_length,
@@ -247,6 +339,9 @@ int main(void)
     selected_counters_updated = read_until(master_fd, output, sizeof(output),
                                            &output_length,
                                            "Packets A>B/B>A: 2/0", 1000);
+    new_full_decode_visible_while_open =
+        read_until(master_fd, output, sizeof(output), &output_length,
+                   "ff fb 03", 1000);
     assert(write(master_fd, "\033OB\033OB", 6U) == 6);
     details_followed_highlight =
         read_until(master_fd, output, sizeof(output), &output_length,
@@ -292,6 +387,7 @@ int main(void)
     assert(new_flow_visible_while_open);
     assert(selected_counters_updated);
     assert(details_followed_highlight);
+    assert(new_full_decode_visible_while_open);
     assert(protocol_filter_applied);
     assert(filters_cleared_by_reset);
     puts("curses pty interaction test passed");

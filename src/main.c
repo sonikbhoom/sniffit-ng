@@ -1,6 +1,7 @@
 #include "sniffit_ng/capture.h"
 #include "sniffit_ng/config.h"
 #include "sniffit_ng/monitor.h"
+#include "sniffit_ng/packet_inspect.h"
 #include "sniffit_ng/pcap_writer.h"
 #include "sniffit_ng/payload_log.h"
 #include "sniffit_ng/privilege.h"
@@ -8,6 +9,7 @@
 
 #include <stdbool.h>
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -18,10 +20,47 @@
 static void print_usage(FILE *stream, const char *program)
 {
     fprintf(stream, "Usage: %s --read-pcap FILE [--config FILE] [--inspect-payloads]\n", program);
+    fprintf(stream, "       %s --inspect-pcap FILE\n", program);
     fprintf(stream, "       %s --interface DEVICE [--promiscuous] [--config FILE] [--inspect-payloads]\n", program);
     fprintf(stream, "       %s [--read-pcap FILE|--interface DEVICE] --write-pcap FILE\n", program);
     fprintf(stream, "       %s [--read-pcap FILE|--interface DEVICE] --payload-logging [--payload-log FILE]\n", program);
     fprintf(stream, "       %s --help | --version\n", program);
+}
+
+static int inspect_pcap(const char *path)
+{
+    char error[256] = {0};
+    struct sn_capture_packet packet;
+    struct sn_capture *capture = sn_capture_open_offline(path, error, sizeof(error));
+    enum sn_capture_result result;
+    size_t packet_number = 0U;
+    int status = 0;
+
+    if (capture == NULL) {
+        fprintf(stderr, "sniffit-ng: %s\n", error);
+        return 1;
+    }
+    puts("Address attribution: IPv4 source is an unauthenticated packet claim; "
+         "link-layer source identifies only the captured local link.");
+    puts("Capture direction is shown only when encoded by the link header; "
+         "Ethernet pcap records do not encode ingress versus egress.");
+    while ((result = sn_capture_next(capture, &packet,
+                                     error, sizeof(error))) == SN_CAPTURE_PACKET) {
+        ++packet_number;
+        if (!sn_packet_inspect(stdout, &packet, packet_number)) {
+            fprintf(stderr, "sniffit-ng: failed writing packet inspection\n");
+            status = 1;
+            break;
+        }
+    }
+    if (result == SN_CAPTURE_ERROR) {
+        fprintf(stderr, "sniffit-ng: capture read failed: %s\n", error);
+        status = 1;
+    } else if (result == SN_CAPTURE_EOF && status == 0) {
+        printf("EOF packets=%zu\n", packet_number);
+    }
+    sn_capture_close(capture);
+    return status;
 }
 
 static bool load_application_config(const char *requested_path,
@@ -156,6 +195,7 @@ static int replay_pcap(const char *path,
                        bool payload_logging_enabled,
                        bool pcap_recording_enabled,
                        bool payload_inspection_enabled,
+                       bool full_decode_enabled,
                        bool show_raw_flows,
                        bool tainted_extensions,
                        const enum sn_decoder_mode decoder_modes[
@@ -207,6 +247,14 @@ static int replay_pcap(const char *path,
     }
 
     sn_monitor_init(&monitor, SN_FLOW_DEFAULT_IDLE_TIMEOUT_NS);
+    if (!sn_monitor_set_full_decode(&monitor, full_decode_enabled)) {
+        fprintf(stderr, "sniffit-ng: could not allocate full-decode history\n");
+        sn_monitor_destroy(&monitor);
+        (void)sn_payload_log_close(payload_log);
+        (void)sn_pcap_writer_close(pcap_writer);
+        sn_capture_close(capture);
+        return 1;
+    }
     sn_monitor_set_payload_inspection(&monitor, payload_inspection_enabled);
     sn_monitor_set_decode_options(&monitor, show_raw_flows, tainted_extensions,
                                   decoder_modes);
@@ -243,19 +291,23 @@ static int replay_pcap(const char *path,
         status = 1;
     }
     if (status != 0) {
+        sn_monitor_destroy(&monitor);
         return status;
     }
-    return sn_ui_run(&monitor, NULL,
-                     payload_logging_enabled || pcap_recording_enabled,
-                     payload_inspection_enabled,
-                     priority_ports, priority_count,
-                     NULL, NULL);
+    status = sn_ui_run(&monitor, NULL,
+                       payload_logging_enabled || pcap_recording_enabled,
+                       payload_inspection_enabled,
+                       priority_ports, priority_count,
+                       NULL, NULL);
+    sn_monitor_destroy(&monitor);
+    return status;
 }
 
 static int run_live_capture(const char *device,
                             bool promiscuous,
                             bool payload_logging_enabled,
                             bool payload_inspection_enabled,
+                            bool full_decode_enabled,
                             bool show_raw_flows,
                             bool tainted_extensions,
                             const enum sn_decoder_mode decoder_modes[
@@ -334,6 +386,14 @@ static int run_live_capture(const char *device,
     }
 
     sn_monitor_init(&monitor, SN_FLOW_DEFAULT_IDLE_TIMEOUT_NS);
+    if (!sn_monitor_set_full_decode(&monitor, full_decode_enabled)) {
+        fprintf(stderr, "sniffit-ng: could not allocate full-decode history\n");
+        sn_monitor_destroy(&monitor);
+        sn_capture_close(capture);
+        (void)sn_pcap_writer_close(pcap_writer);
+        (void)sn_payload_log_close(payload_log);
+        return 1;
+    }
     sn_monitor_set_payload_inspection(&monitor, payload_inspection_enabled);
     sn_monitor_set_decode_options(&monitor, show_raw_flows, tainted_extensions,
                                   decoder_modes);
@@ -348,6 +408,7 @@ static int run_live_capture(const char *device,
                           priority_ports, priority_count,
                           poll_live_capture, &live);
 
+    sn_monitor_destroy(&monitor);
     sn_capture_close(capture);
     if (!sn_pcap_writer_close(pcap_writer)) {
         fprintf(stderr, "sniffit-ng: failed closing pcap recording\n");
@@ -364,6 +425,7 @@ static int run_live_capture(const char *device,
 int main(int argc, char **argv)
 {
     const char *pcap_path = NULL;
+    const char *inspect_pcap_path = NULL;
     const char *pcap_output_path = NULL;
     const char *interface_name = NULL;
     const char *payload_log_path = NULL;
@@ -386,6 +448,9 @@ int main(int argc, char **argv)
         }
         if (strcmp(argv[index], "--read-pcap") == 0 && index + 1 < argc && pcap_path == NULL) {
             pcap_path = argv[++index];
+        } else if (strcmp(argv[index], "--inspect-pcap") == 0 &&
+                   index + 1 < argc && inspect_pcap_path == NULL) {
+            inspect_pcap_path = argv[++index];
         } else if (strcmp(argv[index], "--interface") == 0 &&
                    index + 1 < argc && interface_name == NULL) {
             interface_name = argv[++index];
@@ -410,6 +475,17 @@ int main(int argc, char **argv)
         }
     }
 
+    if (inspect_pcap_path != NULL) {
+        if (pcap_path != NULL || interface_name != NULL || promiscuous ||
+            payload_logging_enabled || payload_inspection_requested ||
+            pcap_output_path != NULL || payload_log_path != NULL ||
+            config_path != NULL) {
+            print_usage(stderr, argv[0]);
+            return 2;
+        }
+        return inspect_pcap(inspect_pcap_path);
+    }
+
     if ((pcap_path == NULL) == (interface_name == NULL) ||
         (promiscuous && interface_name == NULL) ||
         (payload_log_path != NULL && !payload_logging_enabled)) {
@@ -432,6 +508,10 @@ int main(int argc, char **argv)
         fprintf(stderr,
                 "sniffit-ng: payload display enabled; inspect only authorized traffic and handle sensitive data ethically\n");
     }
+    if (config.full_decode) {
+        fprintf(stderr,
+                "sniffit-ng: full Telnet packet hex enabled; captured bytes can include cleartext credentials and private data\n");
+    }
     if (config.tainted_extensions) {
         fprintf(stderr,
                 "sniffit-ng: tainted compile-time protocol extensions enabled; extension code is not sandboxed\n");
@@ -448,7 +528,8 @@ int main(int argc, char **argv)
     if (pcap_path != NULL) {
         return replay_pcap(pcap_path, payload_logging_enabled,
                            pcap_output_path != NULL,
-                           payload_inspection_enabled, config.show_raw_flows,
+                           payload_inspection_enabled, config.full_decode,
+                           config.show_raw_flows,
                            config.tainted_extensions, config.decoder_modes,
                            config.ui_priority_ports, config.ui_priority_count,
                            payload_log_path,
@@ -456,6 +537,7 @@ int main(int argc, char **argv)
     }
     return run_live_capture(interface_name, promiscuous,
                             payload_logging_enabled, payload_inspection_enabled,
+                            config.full_decode,
                             config.show_raw_flows, config.tainted_extensions,
                             config.decoder_modes,
                             config.ui_priority_ports, config.ui_priority_count,

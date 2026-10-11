@@ -325,6 +325,114 @@ static void test_tcp_and_udp_metadata(void)
     assert(strstr(output, "abc") == NULL);
 }
 
+static void test_telnet_negotiation_is_decoded_without_payload_text(void)
+{
+    static const uint8_t telnet_payload[] = {
+        'l', 'o', 'g', 'i', 'n', ':', ' ', 'u', 's', 'e', 'r',
+        255U, 253U, 24U,
+        255U, 251U, 1U,
+        255U, 250U, 24U, 0U, 'x', 't', 'e', 'r', 'm', 255U, 240U,
+        255U, 255U
+    };
+    uint8_t tcp[20] = {0};
+    struct sn_packet_view packet = {0};
+    char output[SN_PACKET_DECODE_TEXT_CAPACITY];
+
+    tcp[0] = 0xc3U;
+    tcp[1] = 0x50U;
+    tcp[2] = 0U;
+    tcp[3] = 23U;
+    tcp[12] = 0x50U;
+    packet.protocol = 6U;
+    packet.transport = tcp;
+    packet.transport_length = sizeof(tcp) + sizeof(telnet_payload);
+    packet.transport_header_present = true;
+    packet.payload = telnet_payload;
+    packet.payload_length = sizeof(telnet_payload);
+
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "TELNET payload=") != NULL);
+    assert(strstr(output, "DO TERMINAL-TYPE(24)") != NULL);
+    assert(strstr(output, "WILL ECHO(1)") != NULL);
+    assert(strstr(output, "SB TERMINAL-TYPE(24) bytes=6") != NULL);
+    assert(strstr(output, "data=12") != NULL);
+    assert(strstr(output, "login") == NULL);
+    assert(strstr(output, "user") == NULL);
+    assert(strstr(output, "xterm") == NULL);
+
+    char tiny_output[1] = {'x'};
+    assert(!sn_protocol_decode(&packet, tiny_output, sizeof(tiny_output)));
+    assert(tiny_output[0] == '\0');
+}
+
+static void test_telnet_commands_and_truncated_sequences(void)
+{
+    static const uint8_t commands[] = {
+        255U, 241U, 255U, 246U, 255U, 252U, 3U, 255U, 255U, 255U, 200U
+    };
+    static const uint8_t unknown_command[] = {255U, 200U};
+    static const uint8_t truncated_iac[] = {255U};
+    static const uint8_t truncated_negotiation[] = {255U, 253U};
+    static const uint8_t truncated_subnegotiation[] = {
+        255U, 250U, 24U, 'x', 255U
+    };
+    static const uint8_t malformed_subnegotiation[] = {
+        255U, 250U, 24U, 'x', 255U, 251U, 255U, 241U
+    };
+    uint8_t tcp[20] = {0};
+    struct sn_packet_view packet = {0};
+    char output[SN_PACKET_DECODE_TEXT_CAPACITY];
+
+    tcp[0] = 0xc3U;
+    tcp[1] = 0x50U;
+    tcp[2] = 0U;
+    tcp[3] = 23U;
+    tcp[12] = 0x50U;
+    packet.protocol = 6U;
+    packet.transport = tcp;
+    packet.transport_length = sizeof(tcp) + sizeof(commands);
+    packet.transport_header_present = true;
+    packet.payload = commands;
+    packet.payload_length = sizeof(commands);
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "NOP") != NULL);
+    assert(strstr(output, "AYT") != NULL);
+    assert(strstr(output, "WONT SUPPRESS-GO-AHEAD(3)") != NULL);
+    assert(strstr(output, "IAC") != NULL);
+    assert(strstr(output, "+1 controls") != NULL);
+
+    packet.payload = unknown_command;
+    packet.payload_length = sizeof(unknown_command);
+    packet.transport_length = sizeof(tcp) + packet.payload_length;
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "CMD(200)") != NULL);
+
+    packet.payload = truncated_iac;
+    packet.payload_length = sizeof(truncated_iac);
+    packet.transport_length = sizeof(tcp) + packet.payload_length;
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "IAC incomplete") != NULL);
+
+    packet.payload = truncated_negotiation;
+    packet.payload_length = sizeof(truncated_negotiation);
+    packet.transport_length = sizeof(tcp) + packet.payload_length;
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "DO incomplete") != NULL);
+
+    packet.payload = truncated_subnegotiation;
+    packet.payload_length = sizeof(truncated_subnegotiation);
+    packet.transport_length = sizeof(tcp) + packet.payload_length;
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "SB TERMINAL-TYPE(24) bytes=1 incomplete") != NULL);
+    assert(strstr(output, "SB TERMINAL-TYPE(24) bytes=1 x") == NULL);
+
+    packet.payload = malformed_subnegotiation;
+    packet.payload_length = sizeof(malformed_subnegotiation);
+    packet.transport_length = sizeof(tcp) + packet.payload_length;
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "SB TERMINAL-TYPE(24) bytes=1 malformed") != NULL);
+}
+
 static void test_http_summaries_hide_paths_and_sensitive_headers(void)
 {
     static const uint8_t request[] =
@@ -1006,6 +1114,8 @@ int main(void)
     test_tainted_extension_gate_and_output_sanitizing();
     test_protocol_mode_selects_extension_or_simplified_decoder();
     test_tcp_and_udp_metadata();
+    test_telnet_negotiation_is_decoded_without_payload_text();
+    test_telnet_commands_and_truncated_sequences();
     test_http_summaries_hide_paths_and_sensitive_headers();
     test_http_extension_output_contract();
     test_dns_udp_tcp_and_compression_bounds();

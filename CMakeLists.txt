@@ -22,6 +22,10 @@ set(SNIFFIT_NG_CUSTOM_PROTOCOL_DECODER_SOURCE "" CACHE FILEPATH
 add_library(sniffit_packet STATIC src/packet.c)
 target_include_directories(sniffit_packet PUBLIC include)
 
+add_library(sniffit_inspect STATIC src/packet_inspect.c)
+target_include_directories(sniffit_inspect PUBLIC include)
+target_link_libraries(sniffit_inspect PUBLIC sniffit_packet)
+
 add_library(sniffit_decoder_modes STATIC src/decoder_modes.c)
 target_include_directories(sniffit_decoder_modes PUBLIC include)
 
@@ -42,6 +46,7 @@ add_library(sniffit_decode STATIC
     src/protocol_decode.c
     src/decode_icmp.c
     src/decode_tcp.c
+    src/decode_telnet.c
     src/decode_http.c
     src/decode_udp.c
     src/decode_igmp.c
@@ -136,7 +141,7 @@ target_link_libraries(sniffit_ui PUBLIC sniffit_monitor PkgConfig::NCURSESW)
 add_executable(sniffit-ng src/main.c)
 target_link_libraries(sniffit-ng PRIVATE
     sniffit_ui sniffit_payload_log sniffit_pcap_writer sniffit_privilege
-    sniffit_network_info sniffit_config
+    sniffit_network_info sniffit_config sniffit_inspect
 )
 
 install(TARGETS sniffit-ng
@@ -151,6 +156,9 @@ install(FILES sniffit-ng.conf.example
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(sniffit_packet PRIVATE
+        -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+    )
+    target_compile_options(sniffit_inspect PRIVATE
         -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
     )
     target_compile_options(sniffit_decoder_modes PRIVATE
@@ -241,7 +249,9 @@ if(BUILD_TESTING)
     add_test(NAME pcap_writer COMMAND test_pcap_writer)
 
     add_executable(test_capture_pipeline tests/test_capture_pipeline.c)
-    target_link_libraries(test_capture_pipeline PRIVATE sniffit_monitor PkgConfig::PCAP)
+    target_link_libraries(test_capture_pipeline PRIVATE
+        sniffit_monitor sniffit_inspect PkgConfig::PCAP
+    )
     target_compile_definitions(test_capture_pipeline PRIVATE _DEFAULT_SOURCE)
     if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_options(test_capture_pipeline PRIVATE

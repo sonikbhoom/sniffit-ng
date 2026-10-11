@@ -10,6 +10,20 @@
 
 #define SN_MONITOR_EVENT_CAPACITY 128U
 #define SN_MONITOR_RATE_INTERVAL_NS 3000000000ULL
+#define SN_MONITOR_FULL_DECODE_HISTORY_CAPACITY 8U
+#define SN_MONITOR_FULL_DECODE_PACKET_CAPACITY 65535U
+
+struct sn_full_decode_record {
+    bool active;
+    struct sn_flow_endpoint endpoints[2];
+    uint64_t sequence;
+    struct timeval timestamp;
+    enum sn_packet_link_type link_type;
+    size_t captured_length;
+    size_t wire_length;
+    size_t stored_length;
+    uint8_t bytes[SN_MONITOR_FULL_DECODE_PACKET_CAPACITY];
+};
 
 struct sn_monitor_stats {
     uint64_t captured_packets;
@@ -72,9 +86,26 @@ struct sn_monitor {
     struct sn_monitor_event events[SN_MONITOR_EVENT_CAPACITY];
     size_t event_head;
     size_t event_count;
+    struct sn_full_decode_record *full_decode_records;
+    size_t full_decode_next;
+    size_t full_decode_count;
+    uint64_t full_decode_sequence;
+    bool full_decode_enabled;
 };
 
 void sn_monitor_init(struct sn_monitor *monitor, uint64_t idle_timeout_ns);
+
+bool sn_monitor_set_full_decode(struct sn_monitor *monitor, bool enabled);
+
+void sn_monitor_clear_full_decode(struct sn_monitor *monitor);
+
+void sn_monitor_destroy(struct sn_monitor *monitor);
+
+size_t sn_monitor_full_decode_count(const struct sn_monitor *monitor);
+
+const struct sn_full_decode_record *sn_monitor_full_decode_at(
+    const struct sn_monitor *monitor,
+    size_t chronological_index);
 
 void sn_monitor_set_payload_inspection(struct sn_monitor *monitor, bool enabled);
 

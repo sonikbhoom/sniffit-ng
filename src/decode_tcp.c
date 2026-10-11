@@ -39,7 +39,15 @@ bool sn_decode_tcp(const struct sn_packet_view *packet,
         packet->payload_length != packet->transport_length - header_length) {
         return false;
     }
-    if ((source_port == 80U || destination_port == 80U ||
+    if ((source_port == 23U || destination_port == 23U) &&
+        sn_decode_telnet(packet->payload, packet->payload_length,
+                         application, sizeof(application))) {
+        formatted_length = snprintf(output, output_capacity,
+                    "TCP %u->%u flags=0x%02x seq=%u ack=%u win=%u payload=%zu; %s",
+                    source_port, destination_port, tcp[13],
+                    read_be32(tcp + 4U), read_be32(tcp + 8U),
+                    read_be16(tcp + 14U), packet->payload_length, application);
+    } else if ((source_port == 80U || destination_port == 80U ||
          source_port == 8000U || destination_port == 8000U ||
          source_port == 8080U || destination_port == 8080U) &&
         sn_decode_http(packet->payload, packet->payload_length,

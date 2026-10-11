@@ -32,6 +32,7 @@ struct ui_detail_context {
 };
 
 enum {
+    UI_DETAIL_HISTORY_LINES = 8192,
     UI_COLOR_SSH_TELNET = 1,
     UI_COLOR_LOCAL_ADDRESS
 };
@@ -187,6 +188,10 @@ static void draw_screen(struct sn_monitor *monitor,
     size_t title_length;
     size_t visible_rows;
 
+    if (monitor->full_decode_enabled) {
+        (void)snprintf(title, sizeof(title),
+                       "Sniffit NG | FULL TELNET HEX");
+    }
     erase();
     if (COLS < 80 || LINES < 18) {
         mvaddstr(0, 0, "Sniffit NG needs a terminal at least 80 columns by 18 rows.");
@@ -227,7 +232,7 @@ static void draw_screen(struct sn_monitor *monitor,
     }
     draw_title_line(title, local_address_start, local_address_length,
                     colors_enabled);
-    mvprintw(1, 0, "%-5s %-15s:%-5s -> %-15s:%-5s %s",
+    mvprintw(1, 0, "%-5s %-15s:%-5s <-> %-15s:%-5s %s",
              "PROTO", "ENDPOINT A", "PORT", "ENDPOINT B", "PORT",
              "PACKETS A>B/B>A");
     mvhline(2, 0, ACS_HLINE, COLS);
@@ -269,7 +274,7 @@ static void draw_screen(struct sn_monitor *monitor,
                   COLOR_PAIR(UI_COLOR_LOCAL_ADDRESS) : 0)));
         printw("%-15s", endpoint_a);
         attrset(session_attributes);
-        printw(":%-5u -> ", flow->endpoints[0].port);
+        printw(":%-5u <-> ", flow->endpoints[0].port);
         attrset(row_attributes | (priority_flow ? priority_attributes :
                  (apply_flow_colors && endpoint_b_is_local ?
                   COLOR_PAIR(UI_COLOR_LOCAL_ADDRESS) : 0)));
@@ -492,6 +497,170 @@ static void append_decode_record(WINDOW *history,
     }
 }
 
+static bool full_decode_record_matches_flow(
+    const struct sn_full_decode_record *record,
+    const struct sn_flow *flow)
+{
+    return record != NULL && record->active && flow != NULL &&
+           flow->protocol == 6U && record->endpoints[0].port == flow->endpoints[0].port &&
+           record->endpoints[1].port == flow->endpoints[1].port &&
+           memcmp(record->endpoints[0].ipv4, flow->endpoints[0].ipv4, 4U) == 0 &&
+           memcmp(record->endpoints[1].ipv4, flow->endpoints[1].ipv4, 4U) == 0;
+}
+
+static bool flow_is_telnet(const struct sn_flow *flow)
+{
+    return flow != NULL && flow->protocol == 6U &&
+           (flow->endpoints[0].port == 23U || flow->endpoints[1].port == 23U);
+}
+
+static void append_full_decode_record(WINDOW *history,
+                                      const struct sn_full_decode_record *record)
+{
+    static const struct {
+        uint8_t mask;
+        const char *name;
+    } flag_names[] = {
+        {0x80U, "CWR"}, {0x40U, "ECE"}, {0x20U, "URG"},
+        {0x10U, "ACK"}, {0x08U, "PSH"}, {0x04U, "RST"},
+        {0x02U, "SYN"}, {0x01U, "FIN"}
+    };
+    struct sn_packet_view view;
+    enum sn_packet_result parse_result;
+
+    (void)wprintw(history,
+                  "FULL DECODE #%llu %lld.%06ld captured=%zu wire=%zu stored=%zu link=%s\n",
+                  (unsigned long long)record->sequence,
+                  (long long)record->timestamp.tv_sec,
+                  (long)record->timestamp.tv_usec,
+                  record->captured_length, record->wire_length, record->stored_length,
+                  record->link_type == SN_PACKET_LINK_ETHERNET ?
+                      "Ethernet" : "Linux-SLL");
+    if (record->link_type == SN_PACKET_LINK_ETHERNET &&
+        record->stored_length >= 12U) {
+        (void)wprintw(history,
+                      "Local-link MAC src=%02x:%02x:%02x:%02x:%02x:%02x "
+                      "dst=%02x:%02x:%02x:%02x:%02x:%02x (direction unavailable)\n",
+                      record->bytes[6], record->bytes[7], record->bytes[8],
+                      record->bytes[9], record->bytes[10], record->bytes[11],
+                      record->bytes[0], record->bytes[1], record->bytes[2],
+                      record->bytes[3], record->bytes[4], record->bytes[5]);
+    } else if (record->link_type == SN_PACKET_LINK_LINUX_SLL &&
+               record->stored_length >= 16U) {
+        size_t address_length =
+            ((size_t)record->bytes[4] << 8) | record->bytes[5];
+
+        (void)wprintw(history, "Linux-SLL packet type=%u local-link source=",
+                      (unsigned int)(((unsigned int)record->bytes[0] << 8) |
+                                     record->bytes[1]));
+        if (address_length > 8U) {
+            (void)waddstr(history, "invalid-length");
+        } else {
+            for (size_t index = 0U; index < address_length; ++index) {
+                (void)wprintw(history, "%02x", record->bytes[6U + index]);
+            }
+        }
+        (void)waddch(history, '\n');
+    } else {
+        (void)waddstr(history,
+                      "Ethernet direction is not encoded in the capture header.\n");
+    }
+
+    parse_result = sn_packet_parse_link_ipv4(record->bytes, record->stored_length,
+                                             record->link_type, &view);
+    if (parse_result == SN_PACKET_OK && view.protocol == 6U &&
+        view.transport_header_present && view.transport_length >= 20U) {
+        char source[INET_ADDRSTRLEN] = "?";
+        char destination[INET_ADDRSTRLEN] = "?";
+        uint8_t flags = view.transport[13];
+        bool has_flag = false;
+
+        (void)inet_ntop(AF_INET, view.source_ipv4, source, sizeof(source));
+        (void)inet_ntop(AF_INET, view.destination_ipv4, destination,
+                        sizeof(destination));
+        (void)wprintw(history,
+                  "Packet claims: %s:%u -> %s:%u flags=0x%02x ns=%u [",
+                      source,
+                      (unsigned int)(((unsigned int)view.transport[0] << 8) |
+                                     view.transport[1]),
+                      destination,
+                      (unsigned int)(((unsigned int)view.transport[2] << 8) |
+                                     view.transport[3]), flags,
+                      (unsigned int)(view.transport[12] & 0x01U));
+        for (size_t index = 0U; index < sizeof(flag_names) / sizeof(flag_names[0]);
+             ++index) {
+            if ((flags & flag_names[index].mask) != 0U) {
+                (void)wprintw(history, "%s%s", has_flag ? "|" : "",
+                              flag_names[index].name);
+                has_flag = true;
+            }
+        }
+        if (!has_flag) {
+            (void)waddstr(history, "none");
+        }
+        (void)waddstr(history, "]\n");
+    }
+    (void)waddstr(history,
+                  "IP source is unauthenticated; link source is local-link metadata.\n");
+    if (record->stored_length < record->captured_length) {
+        (void)wprintw(history, "Hex dump limited to %zu of %zu captured bytes.\n",
+                      record->stored_length, record->captured_length);
+    }
+    if (record->captured_length < record->wire_length) {
+        (void)wprintw(history,
+                      "Capture truncated: %zu of %zu wire bytes were recorded.\n",
+                      record->captured_length, record->wire_length);
+    }
+    (void)waddstr(history, "Hex bytes include headers and payload; no ASCII rendering.\n");
+    for (size_t offset = 0U; offset < record->stored_length; offset += 16U) {
+        size_t row_length = record->stored_length - offset;
+
+        if (row_length > 16U) {
+            row_length = 16U;
+        }
+        (void)wprintw(history, "%04zx  ", offset);
+        for (size_t index = 0U; index < row_length; ++index) {
+            (void)wprintw(history, "%02x%s", record->bytes[offset + index],
+                          index + 1U == row_length ? "" : " ");
+        }
+        (void)waddch(history, '\n');
+    }
+    (void)waddch(history, '\n');
+}
+
+static bool append_latest_full_decode(struct sn_monitor *monitor,
+                                      const struct sn_flow *flow,
+                                      WINDOW *history,
+                                      uint64_t *seen_sequence)
+{
+    const struct sn_full_decode_record *latest = NULL;
+
+    if (!monitor->full_decode_enabled || !flow_is_telnet(flow)) {
+        return false;
+    }
+    for (size_t index = 0U; index < sn_monitor_full_decode_count(monitor); ++index) {
+        const struct sn_full_decode_record *record =
+            sn_monitor_full_decode_at(monitor, index);
+        if (full_decode_record_matches_flow(record, flow)) {
+            latest = record;
+        }
+    }
+    if (latest == NULL) {
+        if (*seen_sequence == 0U) {
+            (void)waddstr(history,
+                          "Full Decode: no recent valid TCP/23 packet is retained.\n"
+                          "Malformed or truncated packets are not attached to flows.\n");
+        }
+        return false;
+    }
+    if (latest->sequence <= *seen_sequence) {
+        return false;
+    }
+    append_full_decode_record(history, latest);
+    *seen_sequence = latest->sequence;
+    return true;
+}
+
 static void refresh_detail_panel(WINDOW *panel, WINDOW *history, int panel_x)
 {
     int history_height = LINES - 13;
@@ -550,6 +719,7 @@ static void append_matching_events(struct sn_monitor *monitor,
                                    size_t *seen_next,
                                    size_t *seen_decode_count,
                                    size_t *seen_decode_next,
+                                   uint64_t *seen_full_decode_sequence,
                                    int panel_x)
 {
     struct sn_monitor_event event;
@@ -592,6 +762,38 @@ static void append_matching_events(struct sn_monitor *monitor,
                 changed = true;
             }
         }
+        if (monitor->full_decode_enabled && flow_is_telnet(identity)) {
+            const struct sn_full_decode_record *latest = NULL;
+            const struct sn_flow *current_flow = NULL;
+
+            for (size_t index = 0U; index < SN_FLOW_TABLE_CAPACITY; ++index) {
+                const struct sn_flow *candidate = &monitor->flows.entries[index];
+
+                if (candidate->active && same_flow_identity(candidate, identity)) {
+                    current_flow = candidate;
+                    break;
+                }
+            }
+            for (size_t index = 0U; index < sn_monitor_full_decode_count(monitor); ++index) {
+                const struct sn_full_decode_record *record =
+                    sn_monitor_full_decode_at(monitor, index);
+
+                if (full_decode_record_matches_flow(record, identity)) {
+                    latest = record;
+                }
+            }
+            if (latest != NULL && current_flow != NULL &&
+                latest->sequence > *seen_full_decode_sequence) {
+                (void)werase(history);
+                for (size_t index = 0U; index < current_flow->decode_history_count; ++index) {
+                    append_decode_record(history,
+                                         sn_flow_decode_history_at(current_flow, index));
+                }
+                append_full_decode_record(history, latest);
+                *seen_full_decode_sequence = latest->sequence;
+                changed = true;
+            }
+        }
     }
     if (changed) {
         refresh_detail_panel(panel, history, panel_x);
@@ -610,6 +812,7 @@ static void draw_detail_contents(struct ui_detail_context *context,
                                  size_t *seen_next,
                                  size_t *seen_decode_count,
                                  size_t *seen_decode_next,
+                                 uint64_t *seen_full_decode_sequence,
                                  bool load_history)
 {
     const char *service_a = sn_ui_port_service_name(flow->protocol,
@@ -623,10 +826,13 @@ static void draw_detail_contents(struct ui_detail_context *context,
         *seen_next = flow->icmp_history_next;
         *seen_decode_count = flow->decode_history_count;
         *seen_decode_next = flow->decode_history_next;
+        *seen_full_decode_sequence = 0U;
     }
     (void)werase(panel);
     (void)box(panel, 0, 0);
-    (void)mvwprintw(panel, 1, 2, "%s flow", protocol_name(flow->protocol));
+    (void)mvwprintw(panel, 1, 2, "%s flow%s", protocol_name(flow->protocol),
+                    context->monitor->full_decode_enabled && flow_is_telnet(flow) ?
+                        " | FULL TELNET HEX" : "");
     (void)mvwprintw(panel, 2, 2, "A %u.%u.%u.%u:%u",
                     flow->endpoints[0].ipv4[0], flow->endpoints[0].ipv4[1],
                     flow->endpoints[0].ipv4[2], flow->endpoints[0].ipv4[3],
@@ -652,6 +858,10 @@ static void draw_detail_contents(struct ui_detail_context *context,
     }
     for (size_t index = 0U; index < flow->decode_history_count; ++index) {
         append_decode_record(history, sn_flow_decode_history_at(flow, index));
+    }
+    if (load_history) {
+        (void)append_latest_full_decode(context->monitor, flow, history,
+                                        seen_full_decode_sequence);
     }
     if (flow->protocol == 1U && context->payload_inspection_active) {
         for (size_t index = 0U; index < flow->icmp_history_count; ++index) {
@@ -728,8 +938,9 @@ static void show_details(struct ui_detail_context *context,
     size_t seen_next = 0U;
     size_t seen_decode_count = 0U;
     size_t seen_decode_next = 0U;
+    uint64_t seen_full_decode_sequence = 0U;
     WINDOW *panel = newwin(LINES, panel_width, 0, panel_x);
-    WINDOW *history = newpad(8192, history_width);
+    WINDOW *history = newpad(UI_DETAIL_HISTORY_LINES, history_width);
     int key;
 
     if (panel == NULL || history == NULL) {
@@ -745,7 +956,8 @@ static void show_details(struct ui_detail_context *context,
     (void)idlok(history, true);
     draw_detail_contents(context, &identity, panel, history, panel_x,
                          &seen_count, &seen_next,
-                         &seen_decode_count, &seen_decode_next, true);
+                         &seen_decode_count, &seen_decode_next,
+                         &seen_full_decode_sequence, true);
 
     for (;;) {
         key = getch();
@@ -759,7 +971,8 @@ static void show_details(struct ui_detail_context *context,
                     append_matching_events(context->monitor, &identity, panel, history,
                                            context->payload_inspection_active,
                                            &seen_count, &seen_next,
-                                           &seen_decode_count, &seen_decode_next, panel_x);
+                                           &seen_decode_count, &seen_decode_next,
+                                           &seen_full_decode_sequence, panel_x);
                     redraw_detail_background(context, &identity);
                     draw_detail_background(context);
                     if (context->flow_count > 0U) {
@@ -771,6 +984,7 @@ static void show_details(struct ui_detail_context *context,
                         draw_detail_contents(context, &identity, panel, history, panel_x,
                                              &seen_count, &seen_next,
                                              &seen_decode_count, &seen_decode_next,
+                                             &seen_full_decode_sequence,
                                              focus_changed);
                         refresh_detail_panel(panel, history, panel_x);
                     }
@@ -785,11 +999,12 @@ static void show_details(struct ui_detail_context *context,
             history_width = panel_width - 4;
             (void)wresize(panel, LINES, panel_width);
             (void)mvwin(panel, 0, panel_x);
-            (void)wresize(history, 8192, history_width);
+            (void)wresize(history, UI_DETAIL_HISTORY_LINES, history_width);
             draw_detail_background(context);
             draw_detail_contents(context, &identity, panel, history, panel_x,
                                  &seen_count, &seen_next,
-                                 &seen_decode_count, &seen_decode_next, false);
+                                 &seen_decode_count, &seen_decode_next,
+                                 &seen_full_decode_sequence, false);
             refresh_detail_panel(panel, history, panel_x);
             continue;
         }
@@ -815,7 +1030,8 @@ static void show_details(struct ui_detail_context *context,
                     identity = *context->flows[next];
                     draw_detail_contents(context, &identity, panel, history, panel_x,
                                          &seen_count, &seen_next,
-                                         &seen_decode_count, &seen_decode_next, true);
+                                         &seen_decode_count, &seen_decode_next,
+                                         &seen_full_decode_sequence, true);
                 }
             }
             continue;
@@ -833,6 +1049,7 @@ static void show_details(struct ui_detail_context *context,
 
 static void reset_monitor(struct sn_monitor *monitor)
 {
+    sn_monitor_clear_full_decode(monitor);
     sn_flow_table_init(&monitor->flows, monitor->flows.idle_timeout_ns);
     monitor->stats = (struct sn_monitor_stats){0};
     monitor->event_head = 0U;

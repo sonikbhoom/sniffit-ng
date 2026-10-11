@@ -16,7 +16,7 @@ Use Sniffit NG only on systems and networks you own or have permission to monito
 
 - Live capture and saved pcap files on Ethernet and Linux cooked v1 (SLL) links.
 - IPv4 connections, packet counts, traffic rates, address and port filters, and packet error counts.
-- Short summaries for TCP, UDP, HTTP/1.x, TLS records, DNS, DHCPv4/BOOTP, NTP, SNMP, Syslog, RADIUS, TACACS+, QUIC, RTP/RTCP, ICMP, IGMP, and VRRP.
+- Short summaries for TCP, UDP, Telnet negotiation/control, HTTP/1.x, TLS records, DNS, DHCPv4/BOOTP, NTP, SNMP, Syslog, RADIUS, TACACS+, QUIC, RTP/RTCP, ICMP, IGMP, and VRRP.
 - A terminal view with connection details, basic source/destination filters, and configurable TCP/UDP priority ports.
 - Per-flow detail-pane security advisories for recognized cleartext or unauthenticated services, kept separate from protocol summaries.
 
@@ -36,8 +36,11 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ./build/sniffit-ng --help
 ./build/sniffit-ng --read-pcap capture.pcap
+./build/sniffit-ng --inspect-pcap capture.pcap
 sudo ./build/sniffit-ng --interface lo
 ```
+
+`--inspect-pcap FILE` prints packet-by-packet capture lengths, timestamps, supported link-layer source metadata, IPv4 endpoint claims, TCP flags, and hexadecimal IPv4/TCP headers. It does not print packet payloads. The IPv4 source is not authenticated; Ethernet source addresses identify only the local link, and Ethernet pcaps do not record ingress versus egress direction. Linux cooked v1 records include their packet-type direction when available. TCP checksum values are shown but not validated. This is an offline diagnostic mode and does not alter or restart a live capture.
 
 For repeatable long-running memory and load checks, see the [stability-testing procedure](docs/stability-testing.md).
 
@@ -109,11 +112,22 @@ inspect_payloads = true
 
 The config is read from `$XDG_CONFIG_HOME/sniffit-ng/config` or `~/.config/sniffit-ng/config`. Use `--config FILE` to select another file. The `--inspect-payloads` option also requires the acknowledgment in the loaded config. Missing acknowledgment fails closed. The example config keeps inspection disabled and the acknowledgment commented out. This acknowledgment applies only to in-memory ICMP Echo samples; payload logging and pcap recording each require their own interactive acknowledgment.
 
+`full_decode = true` is a separate opt-in for the Telnet flow detail pane. It retains at most eight complete captured TCP/23 frames in memory and shows the latest matching frame as offset-based hex, including link, IP, TCP, and payload bytes. It does not render ASCII or write packet bytes to disk. Captured bytes can still be decoded into cleartext credentials or private data, so enabling it requires this exact active comment:
+
+```ini
+full_decode = true
+## User acknowledges Telnet hex display can expose credentials and private traffic.
+```
+
+The UI marks the mode as active and labels source IPs as unauthenticated claims. Only packets accepted by the bounded IPv4/TCP parser are associated with flows; malformed or genuinely truncated packets are not retained for this view. Ethernet has no direction field; Linux cooked v1 provides its packet type and local-link source metadata. These fields clarify what this host captured but cannot cryptographically prove the remote origin. The in-memory history is capped at eight frames and each frame at 65,535 captured bytes; larger records show a storage-limit note.
+
 Set `ui_priority` to a comma-separated list of protocol-qualified ports, for example `ui_priority = 22/tcp,23/tcp,53/udp`. It defaults to `22/tcp,23/tcp`; accepted protocols are TCP and UDP, and ports must be in the range 1-65535. A flow matching either endpoint is always highlighted red, including when selected. Priority flows sort before other flows; within each group, flows with more total observed bytes sort first, with endpoint order as the deterministic tie-break. Set `ui_priority =` to disable priority ports.
 
 ### Decoder Modes and Extensions
 
 `show_raw_flows = true` adds bounded IPv4 metadata flows for protocols without a built-in summary; it does not display packet bytes. Decoder keys accept `simplified` or `raw` for the currently dispatched modules: `icmp`, `igmp`, `tcp`, `http`, `telnet`, `dns`, `tls`, `tacacs`, `syslog`, `udp`, `dhcp4`, `snmp`, `ntp`, `quic`, `rtp`, `rtcp`, `radius`, and `vrrp`. Modes default to `simplified` and are selected at runtime through config. Researcher-supplied HTTP and protocol extensions are included at build time and require `tainted_extensions = true` for every protocol; this is explicit opt-in, not sandboxing. `show_raw_flows` and built-in summaries do not require taint opt-in. When a recognized service has a cleartext or unauthenticated risk, the flow detail pane presents a bounded security advisory separately from decoded protocol summaries. Examples include HTTP, DNS, Telnet, NTP, ICMP, SNMPv1/v2c, and RADIUS. Advisories describe protocol or service risks, not the security of every deployment.
+
+For TCP/23, the simplified Telnet summary decodes packet-local IAC commands, WILL/WONT/DO/DONT negotiations, recognized option names, and subnegotiation option/length. It omits login text and all subnegotiation values, which may contain credentials, terminal identifiers, or environment data. It does not reassemble TCP streams; split Telnet commands are marked incomplete or may require later packets to interpret.
 
 Researchers can provide a source file at build time with `-DSNIFFIT_NG_CUSTOM_PROTOCOL_DECODER_SOURCE=/path/to/decoder.c`. It must implement `sn_protocol_decode_extension` from `include/sniffit_ng/protocol_decode_extension.h`. The callback receives a read-only, length-bounded IPv4 packet view and returns bounded text that the core sanitizes before display. This is static linking, not a sandbox: compiled extensions can inspect packet data and run with the process user's privileges. The separate built-in payload-inspection setting does not constrain researcher extensions. No researcher decoder or exploit code is included in this project.
 
