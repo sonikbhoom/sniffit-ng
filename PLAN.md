@@ -47,8 +47,10 @@ At each inspection checkpoint, report: deliverable completed, exact command/test
 - **ICMP Enter details:** A right-side pane preserves the flow list on the left. Echo request/reply type, direction, identifier, sequence, and 64-byte hex/ASCII records append to a scrolling history as packets arrive; up to 16 records/flow are retained in memory. The pane does not repaint on idle polls; navigation keys switch flows, and other keys close it. Config acknowledgment gates all payload retention; no payload is written to disk by this feature.
 - **Live inspection updates:** The detail pane now continues to refresh while capture runs, including new flows and updated counters. Selection remains tied to flow identity as sorting changes, and arrow navigation changes the inspected flow. A PTY regression covers these behaviors.
 - **Interface context:** Live mode shows the interface and local IPv4 in the title. External IPv4 lookup is default-off and makes one HTTPS request to ifconfig.io only when explicitly enabled for an RFC 1918 interface. The request has not been manually exercised; no external request is part of tests.
+- **Local address cue:** When terminal colors are available, the selected interface's IPv4 and matching flow-address text use muted green. SSH/Telnet priority sessions remain muted red outside that address span. The selected row retains the standard reverse-video focus treatment without session/local color, avoiding color flicker during navigation; 256-color terminals receive muted palette shades, with basic-color fallback elsewhere.
 - **README screenshots:** Redacted monitor and inspection screenshots are linked in the README. Unredacted originals are ignored by Git.
-- **Current test limitation:** Sanitizer tests `capture_offline` and `capture_pipeline` currently crash in `pcap_dump` while creating test pcaps; the other 16 tests passed in the latest run excluding those two, and the capability-dependent live loopback test was skipped.
+- **SSH/Telnet emphasis:** TCP sessions involving port 22 or 23 are highlighted in red and sorted to the top, regardless of direction.
+- **Current test status:** The non-sanitized `build/live` suite passed 18 tests; live loopback capture skipped because `CAP_NET_RAW` is not permitted. The last sanitizer-enabled run still crashed in `pcap_dump` while creating fixtures for `capture_offline` and `capture_pipeline`.
 
 ## Initial Feature Policy
 
@@ -108,8 +110,7 @@ This is the canonical list of open project work. Add newly agreed TODOs here und
 | Status | Task |
 | --- | --- |
 | [ ] | Add quick protocol, local/remote port, and selected-flow filters. Clearly distinguish display-only filtering from capture filtering. |
-| [ ] | Add optional threat-priority sorting using explainable signals, move flagged flows toward the top, and show why each was prioritized. Treat signals as leads, not verdicts. |
-| [ ] | Add direction colors: blue outbound, green when both directions are observed, and red inbound without a reply. Determine direction from the local interface and provide text cues for monochrome terminals. |
+| [x] | Highlight TCP sessions involving port 22 or 23 in red and sort them to the top, regardless of traffic direction. |
 
 ### Protocol Decoding Features
 

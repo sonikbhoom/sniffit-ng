@@ -107,6 +107,48 @@ static void test_flow_filter_direction_semantics(void)
     assert(!sn_ui_flow_matches(&flow, NULL));
 }
 
+static void test_ssh_telnet_flows_are_highlighted_and_sorted_first(void)
+{
+    struct sn_flow ssh = {0};
+    struct sn_flow ordinary = {0};
+    struct sn_flow telnet = {0};
+    struct sn_flow udp_ssh_port = {0};
+    const struct sn_flow *flows[3];
+
+    ssh.protocol = 6U;
+    ssh.endpoints[0].ipv4[0] = 10U;
+    ssh.endpoints[0].ipv4[3] = 1U;
+    ssh.endpoints[0].port = 40000U;
+    ssh.endpoints[1].ipv4[0] = 10U;
+    ssh.endpoints[1].ipv4[3] = 2U;
+    ssh.endpoints[1].port = 22U;
+    ssh.packets[0] = 1U;
+
+    ordinary = ssh;
+    ordinary.endpoints[1].port = 21U;
+    telnet = ssh;
+    telnet.endpoints[1].port = 23U;
+
+    udp_ssh_port = ssh;
+    udp_ssh_port.protocol = 17U;
+    assert(sn_ui_flow_is_ssh_telnet(&ssh));
+    assert(sn_ui_flow_is_ssh_telnet(&telnet));
+    assert(!sn_ui_flow_is_ssh_telnet(&ordinary));
+    assert(!sn_ui_flow_is_ssh_telnet(&udp_ssh_port));
+
+    ssh.packets[1] = 3U;
+    assert(sn_ui_flow_is_ssh_telnet(&ssh));
+    ssh.packets[1] = 0U;
+
+    flows[0] = &ordinary;
+    flows[1] = &telnet;
+    flows[2] = &ssh;
+    sn_ui_sort_flows_by_priority(flows, 3U);
+    assert(flows[0] == &ssh);
+    assert(flows[1] == &telnet);
+    assert(flows[2] == &ordinary);
+}
+
 static void test_detail_navigation_and_dismissal(void)
 {
     assert(sn_ui_detail_navigation_direction(259, 259, 258) == -1);
@@ -130,6 +172,7 @@ int main(void)
     test_flow_order_is_deterministic();
     test_service_hints_are_protocol_specific();
     test_flow_filter_direction_semantics();
+    test_ssh_telnet_flows_are_highlighted_and_sorted_first();
     test_detail_navigation_and_dismissal();
     puts("ui window tests passed");
     return 0;

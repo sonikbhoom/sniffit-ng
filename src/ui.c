@@ -21,12 +21,38 @@ struct ui_detail_context {
     size_t *selected;
     size_t *scroll_start;
     bool show_stats;
+    bool colors_enabled;
     bool recording_active;
     bool payload_inspection_active;
     bool *capture_polling;
     const char **capture_status;
     const struct sn_monitor_rates *rates;
 };
+
+enum {
+    UI_COLOR_SSH_TELNET = 1,
+    UI_COLOR_LOCAL_ADDRESS
+};
+
+static bool initialize_ui_colors(void)
+{
+    short background = COLOR_BLACK;
+    short priority_color = COLOR_RED;
+    short local_address_color = COLOR_GREEN;
+
+    if (!has_colors() || start_color() == ERR) {
+        return false;
+    }
+    if (COLORS >= 256) {
+        priority_color = 131;
+        local_address_color = 65;
+    }
+    if (use_default_colors() != ERR) {
+        background = -1;
+    }
+    return init_pair(UI_COLOR_SSH_TELNET, priority_color, background) != ERR &&
+           init_pair(UI_COLOR_LOCAL_ADDRESS, local_address_color, background) != ERR;
+}
 
 static size_t collect_flows(struct sn_monitor *monitor,
                             const struct sn_ui_flow_filter *filter,
@@ -40,7 +66,7 @@ static size_t collect_flows(struct sn_monitor *monitor,
             flows[count++] = flow;
         }
     }
-    sn_ui_sort_flows(flows, count);
+    sn_ui_sort_flows_by_priority(flows, count);
     return count;
 }
 
@@ -93,6 +119,42 @@ static void draw_filter_line(const struct sn_ui_flow_filter *filter)
     clrtoeol();
 }
 
+static void draw_title_line(const char *title,
+                            size_t local_address_start,
+                            size_t local_address_length,
+                            bool colors_enabled)
+{
+    size_t visible_length = COLS > 1 ? (size_t)(COLS - 1) : 0U;
+
+    attron(A_BOLD);
+    if (!colors_enabled || local_address_start == SIZE_MAX ||
+        local_address_start >= visible_length || local_address_length == 0U) {
+        mvaddnstr(0, 0, title, (int)visible_length);
+    } else {
+        size_t prefix_length = local_address_start;
+        size_t address_length = local_address_length;
+        size_t suffix_start;
+
+        if (address_length > visible_length - local_address_start) {
+            address_length = visible_length - local_address_start;
+        }
+        if (prefix_length > 0U) {
+            mvaddnstr(0, 0, title, (int)prefix_length);
+        }
+        attroff(A_BOLD);
+        attrset(COLOR_PAIR(UI_COLOR_LOCAL_ADDRESS));
+        mvaddnstr(0, (int)local_address_start, title + local_address_start,
+                  (int)address_length);
+        attrset(A_BOLD);
+        suffix_start = local_address_start + local_address_length;
+        if (suffix_start < visible_length) {
+            mvaddnstr(0, (int)suffix_start, title + suffix_start,
+                      (int)(visible_length - suffix_start));
+        }
+    }
+    attroff(A_BOLD);
+}
+
 static void draw_screen(struct sn_monitor *monitor,
                         const struct sn_network_info *network_info,
                         const struct sn_ui_flow_filter *filter,
@@ -104,9 +166,15 @@ static void draw_screen(struct sn_monitor *monitor,
                         bool recording_active,
                         bool payload_inspection_active,
                         const char *capture_status,
-                        const struct sn_monitor_rates *rates)
+                        const struct sn_monitor_rates *rates,
+                        bool colors_enabled)
 {
     char title[256] = "Sniffit NG | Network monitor";
+    size_t local_address_start = SIZE_MAX;
+    size_t local_address_length = 0U;
+    uint8_t local_ipv4[4];
+    bool have_local_ipv4 = network_info != NULL &&
+        inet_pton(AF_INET, network_info->local_ipv4, local_ipv4) == 1;
     size_t title_length;
     size_t visible_rows;
 
@@ -122,8 +190,12 @@ static void draw_screen(struct sn_monitor *monitor,
     if (network_info != NULL && network_info->interface_name[0] != '\0') {
         if (network_info->local_ipv4[0] != '\0') {
             (void)snprintf(title + title_length, sizeof(title) - title_length,
-                           " | %s %s", network_info->interface_name,
-                           network_info->local_ipv4);
+                           " | %s ", network_info->interface_name);
+            local_address_start = strlen(title);
+            local_address_length = strlen(network_info->local_ipv4);
+            title_length = local_address_start;
+            (void)snprintf(title + title_length, sizeof(title) - title_length,
+                           "%s", network_info->local_ipv4);
         } else {
             (void)snprintf(title + title_length, sizeof(title) - title_length,
                            " | %s", network_info->interface_name);
@@ -144,10 +216,8 @@ static void draw_screen(struct sn_monitor *monitor,
         (void)snprintf(title + title_length, sizeof(title) - title_length,
                        " | PAYLOAD DISPLAY ENABLED");
     }
-
-    attron(A_BOLD);
-        mvaddnstr(0, 0, title, COLS - 1);
-    attroff(A_BOLD);
+    draw_title_line(title, local_address_start, local_address_length,
+                    colors_enabled);
     mvprintw(1, 0, "PROTO  ENDPOINT A                         ENDPOINT B                         PACKETS A>B/B>A");
     mvhline(2, 0, ACS_HLINE, COLS);
 
@@ -163,24 +233,43 @@ static void draw_screen(struct sn_monitor *monitor,
         char endpoint_b[INET_ADDRSTRLEN] = "?";
         size_t flow_index = scroll_start + row;
         const struct sn_flow *flow = flows[flow_index];
+        bool priority_flow = sn_ui_flow_is_ssh_telnet(flow);
+        bool endpoint_a_is_local = have_local_ipv4 &&
+            memcmp(flow->endpoints[0].ipv4, local_ipv4, sizeof(local_ipv4)) == 0;
+        bool endpoint_b_is_local = have_local_ipv4 &&
+            memcmp(flow->endpoints[1].ipv4, local_ipv4, sizeof(local_ipv4)) == 0;
+        bool selected_flow = flow_index == selected;
+        bool apply_flow_colors = colors_enabled && !selected_flow;
+        attr_t row_attributes = selected_flow ? A_REVERSE : A_NORMAL;
+        attr_t session_attributes = row_attributes |
+            (apply_flow_colors && priority_flow ?
+             COLOR_PAIR(UI_COLOR_SSH_TELNET) : 0);
 
         (void)inet_ntop(AF_INET, flow->endpoints[0].ipv4,
                         endpoint_a, sizeof(endpoint_a));
         (void)inet_ntop(AF_INET, flow->endpoints[1].ipv4,
                         endpoint_b, sizeof(endpoint_b));
-        if (flow_index == selected) {
-            attron(A_REVERSE);
-        }
-        mvprintw((int)row + 3, 0, "%-5s %-15s:%-5u -> %-15s:%-5u %8llu/%-8llu",
-                 protocol_name(flow->protocol), endpoint_a,
-                 flow->endpoints[0].port, endpoint_b,
-                 flow->endpoints[1].port,
-                 (unsigned long long)flow->packets[0],
-                 (unsigned long long)flow->packets[1]);
+        attrset(session_attributes);
+        mvprintw((int)row + 3, 0, "%-5s ", protocol_name(flow->protocol));
+        attrset(row_attributes | (apply_flow_colors && endpoint_a_is_local ?
+                 COLOR_PAIR(UI_COLOR_LOCAL_ADDRESS) :
+             (apply_flow_colors && priority_flow ?
+                  COLOR_PAIR(UI_COLOR_SSH_TELNET) : 0)));
+        printw("%-15s", endpoint_a);
+        attrset(session_attributes);
+        printw(":%-5u -> ", flow->endpoints[0].port);
+        attrset(row_attributes | (apply_flow_colors && endpoint_b_is_local ?
+                 COLOR_PAIR(UI_COLOR_LOCAL_ADDRESS) :
+             (apply_flow_colors && priority_flow ?
+                  COLOR_PAIR(UI_COLOR_SSH_TELNET) : 0)));
+        printw("%-15s", endpoint_b);
+        attrset(session_attributes);
+        printw(":%-5u %8llu/%-8llu",
+               flow->endpoints[1].port,
+               (unsigned long long)flow->packets[0],
+               (unsigned long long)flow->packets[1]);
+        attrset(A_NORMAL);
         clrtoeol();
-        if (flow_index == selected) {
-            attroff(A_REVERSE);
-        }
     }
     if (visible_rows == 0U) {
         mvaddstr(3, 0, flow_count == 0U ? "No connections seen yet." :
@@ -227,7 +316,7 @@ static void draw_screen(struct sn_monitor *monitor,
     if (capture_status != NULL) {
         mvaddnstr(LINES - 1, 0, capture_status, COLS - 1);
     } else {
-        mvaddstr(LINES - 1, 0, " j/k or arrows: move  1-4: filters  Enter: details  n: stats  r: reset  q: quit ");
+        mvaddstr(LINES - 1, 0, " j/k move  1-4 filter  Enter details  n stats  r reset  q quit ");
     }
     clrtoeol();
     attroff(A_REVERSE);
@@ -521,7 +610,7 @@ static void draw_detail_background(struct ui_detail_context *context)
                 context->flow_count, *context->selected, *context->scroll_start,
                 context->show_stats, context->recording_active,
                 context->payload_inspection_active, *context->capture_status,
-                context->rates);
+                context->rates, context->colors_enabled);
 }
 
 static void show_details(struct ui_detail_context *context,
@@ -664,6 +753,7 @@ int sn_ui_run(struct sn_monitor *monitor,
     struct sn_monitor_rate_sampler rate_sampler;
     struct sn_monitor_rates rates = {0};
     bool rates_ready = false;
+    bool colors_enabled;
     int key;
 
     if (monitor == NULL || initscr() == NULL) {
@@ -674,6 +764,7 @@ int sn_ui_run(struct sn_monitor *monitor,
     keypad(stdscr, true);
     wtimeout(stdscr, capture_polling ? 50 : -1);
     (void)curs_set(0);
+    colors_enabled = initialize_ui_colors();
     sn_monitor_rate_sampler_init(&rate_sampler);
 
     for (;;) {
@@ -706,15 +797,16 @@ int sn_ui_run(struct sn_monitor *monitor,
             .selected = &selected,
             .scroll_start = &scroll_start,
             .show_stats = show_stats,
+            .colors_enabled = colors_enabled,
             .recording_active = recording_active,
             .payload_inspection_active = payload_inspection_active,
             .capture_polling = &capture_polling,
             .capture_status = &capture_status,
             .rates = rates_ready ? &rates : (capture_polling ? &rates : NULL)
         };
-        draw_screen(monitor, network_info, &filter, flows, flow_count, selected, scroll_start, show_stats,
-                recording_active, payload_inspection_active, capture_status,
-                detail_context.rates);
+        draw_screen(monitor, network_info, &filter, flows, flow_count, selected, scroll_start,
+                show_stats, recording_active, payload_inspection_active,
+            capture_status, detail_context.rates, colors_enabled);
         key = getch();
         if (key == 'q' || key == 'Q') {
             break;

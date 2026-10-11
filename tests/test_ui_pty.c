@@ -22,20 +22,24 @@ static void seed_flows(struct sn_monitor *monitor)
 
     first->active = true;
     first->protocol = 6U;
-    first->endpoints[0].ipv4[0] = 192U;
-    first->endpoints[0].ipv4[3] = 1U;
+    first->endpoints[0].ipv4[0] = 152U;
+    first->endpoints[0].ipv4[1] = 2U;
+    first->endpoints[0].ipv4[2] = 23U;
+    first->endpoints[0].ipv4[3] = 104U;
     first->endpoints[0].port = 40000U;
-    first->endpoints[1].ipv4[0] = 152U;
-    first->endpoints[1].ipv4[1] = 2U;
-    first->endpoints[1].ipv4[2] = 23U;
-    first->endpoints[1].ipv4[3] = 104U;
-    first->endpoints[1].port = 80U;
+    first->endpoints[1].ipv4[0] = 192U;
+    first->endpoints[1].ipv4[1] = 168U;
+    first->endpoints[1].ipv4[2] = 1U;
+    first->endpoints[1].ipv4[3] = 7U;
+    first->endpoints[1].port = 22U;
     first->packets[0] = 1U;
 
     second->active = true;
     second->protocol = 17U;
     second->endpoints[0].ipv4[0] = 192U;
-    second->endpoints[0].ipv4[3] = 1U;
+    second->endpoints[0].ipv4[1] = 168U;
+    second->endpoints[0].ipv4[2] = 1U;
+    second->endpoints[0].ipv4[3] = 7U;
     second->endpoints[0].port = 40001U;
     second->endpoints[1].ipv4[0] = 192U;
     second->endpoints[1].ipv4[1] = 0U;
@@ -115,6 +119,18 @@ static bool read_until(int fd, char *output, size_t capacity, size_t *length,
     return false;
 }
 
+static size_t count_occurrences(const char *text, const char *needle)
+{
+    size_t count = 0U;
+    size_t needle_length = strlen(needle);
+
+    while ((text = strstr(text, needle)) != NULL) {
+        ++count;
+        text += needle_length;
+    }
+    return count;
+}
+
 int main(void)
 {
     struct winsize terminal_size = {0};
@@ -145,7 +161,7 @@ int main(void)
         struct ui_poll_context poll_context;
 
         (void)close(trigger_pipe[1]);
-        (void)setenv("TERM", "xterm", 1);
+        (void)setenv("TERM", "xterm-256color", 1);
         sn_monitor_init(&monitor, UINT64_MAX);
         seed_flows(&monitor);
         poll_context = (struct ui_poll_context){
@@ -157,10 +173,19 @@ int main(void)
     }
 
     (void)close(trigger_pipe[0]);
-    assert(write(master_fd, "\n", 1U) == 1);
     assert(read_until(master_fd, output, sizeof(output), &output_length,
-                      "ppp0 192.168.1.7", 1000));
+                      "ppp0 ", 1000));
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "192.168.1.7", 1000));
     assert(strstr(output, "external 203.0.113.7") != NULL);
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "q quit", 1000));
+    assert(count_occurrences(output, "\033[38;5;65m") == 2U);
+    assert(strstr(output, "\033[38;5;131m") == NULL);
+    assert(strstr(output, "DIRECTION") == NULL);
+    assert(strstr(output, "IN?") == NULL);
+    assert(strstr(output, "t priority") == NULL);
+    assert(write(master_fd, "\n", 1U) == 1);
     details_opened = read_until(master_fd, output, sizeof(output), &output_length,
                                 "TCP flow", 1000);
     if (details_opened) {
@@ -174,7 +199,7 @@ int main(void)
     assert(write(master_fd, "\033OB", 3U) == 3);
     details_followed_highlight =
         read_until(master_fd, output, sizeof(output), &output_length,
-                   "UDP flow", 1000);
+                   "A 10.0.0.1:1234", 1000);
     assert(write(master_fd, "qq", 2U) == 2);
     assert(waitpid(child, &child_status, 0) == child);
     assert(WIFEXITED(child_status));

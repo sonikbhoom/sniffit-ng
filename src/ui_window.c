@@ -73,6 +73,40 @@ void sn_ui_sort_flows(const struct sn_flow **flows, size_t flow_count)
     }
 }
 
+bool sn_ui_flow_is_ssh_telnet(const struct sn_flow *flow)
+{
+    return flow != NULL && flow->protocol == 6U &&
+           (flow->endpoints[0].port == 22U || flow->endpoints[0].port == 23U ||
+            flow->endpoints[1].port == 22U || flow->endpoints[1].port == 23U);
+}
+
+void sn_ui_sort_flows_by_priority(const struct sn_flow **flows,
+                                  size_t flow_count)
+{
+    if (flows == NULL || flow_count < 2U) {
+        return;
+    }
+    for (size_t index = 1U; index < flow_count; ++index) {
+        const struct sn_flow *current = flows[index];
+        bool current_priority = sn_ui_flow_is_ssh_telnet(current);
+        size_t insertion = index;
+
+        while (insertion > 0U) {
+            const struct sn_flow *previous = flows[insertion - 1U];
+            bool previous_priority = sn_ui_flow_is_ssh_telnet(previous);
+            bool precedes = current_priority != previous_priority ?
+                current_priority : compare_flows(current, previous) < 0;
+
+            if (!precedes) {
+                break;
+            }
+            flows[insertion] = previous;
+            --insertion;
+        }
+        flows[insertion] = current;
+    }
+}
+
 const char *sn_ui_port_service_name(uint8_t protocol, uint16_t port)
 {
     if (protocol == 6U) {

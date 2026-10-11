@@ -412,7 +412,7 @@ int main(int argc, char **argv)
     }
     if (payload_inspection_enabled) {
         fprintf(stderr,
-                "sniffit-ng: ICMP payload display enabled; inspect only authorized traffic and handle sensitive data ethically\n");
+                "sniffit-ng: payload display enabled; inspect only authorized traffic and handle sensitive data ethically\n");
     }
     if ((payload_logging_enabled || pcap_output_path != NULL) &&
         !acknowledge_capture_recording()) {
