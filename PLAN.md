@@ -19,7 +19,7 @@ The source review found packet parsing that does not receive or check libpcap's 
 
 ## Delivery Stages
 
-1. **Characterize parity:** Record legacy options, config behavior, interface layout/key bindings, live/offline capture, filters, connection counters/details, logging, plugins, and packet generation. Mark unsafe or incompatible behavior explicitly.
+1. **Characterize parity:** Record legacy options, config behavior, interface layout/key bindings, live/offline capture, filters, connection counters/details, logging, plugins, and packet generation as a legacy behavior that is out of scope for the successor. Mark unsafe or incompatible behavior explicitly.
 2. **Bootstrap `sniffit-ng`:** Maintain a standalone build, tests, and documentation. Start with a pure-C parser library so its safety can be tested without privileges, libpcap, or curses.
 3. **Safe packet model:** Parse supported link framing and IPv4/TCP/UDP/ICMP using captured-span checks. Validate version, IHL, total length, and transport lengths. Expose payload only as a bounded view. Compute checksum validity without rejecting captures solely because of NIC checksum offload.
 4. **Capture and flow engine:** Add live and offline libpcap sources, selected-interface/link-type validation, explicit filters, bounded flow state, and a bounded event queue. Do not require the whole application to remain root; open capture resources with the least required privilege, then drop privileges.
@@ -63,7 +63,7 @@ At each inspection checkpoint, report: deliverable completed, exact command/test
 
 - Preserve authorized live monitoring, offline pcap replay, filters, counters, connection summaries/details, and conventional logging.
 - Keep payload display user-selected and in-memory by default. Do not automatically identify or extract credentials. Do not bypass encryption or access controls; security advisories and passive metadata summaries are not decryption features.
-- Preserve packet generation only as a separately enabled diagnostic feature, with an explicit startup warning/confirmation and documentation restricting use to authorized test networks.
+- Keep the application receive-only: do not add packet generation or active probes. Test harnesses may generate only their own loopback traffic under the existing test restrictions. Reconsider packet generation only after a concrete authorized test-network use case is documented and explicitly approved.
 - Treat legacy config/CLI compatibility as a migration aid, not as permission to preserve unsafe parsing or ambiguous semantics.
 
 ## Approval Boundary
@@ -72,7 +72,7 @@ Payload logging is off by default and will not be enabled by a config file or re
 
 ICMP Echo payload inspection is a distinct, in-memory-only feature. It is disabled by default and requires either `--inspect-payloads` or `inspect_payloads = true` in config, plus the exact active comment `## User has acknowledged to behave ethically and inspect only authorized traffic.` in the loaded config. This persisted marker avoids repeating a prompt but does not enable payload logging. When enabled, up to 16 recent ICMP Echo records per flow are retained, each with at most 256 payload bytes; larger samples are truncated and their original length is preserved for display. Other protocol payloads are not retained for this detail view. Printable text is sanitized before display. Disabling the setting clears retained sample bytes.
 
-Packet generation will also be off by default and separately gated by an explicit command-line option plus an acknowledgment before sending. No stealth, evasion, or third-party traffic testing is in scope.
+Packet generation and active probes are out of scope; the application has no packet-transmission path. Test harnesses may generate only their own loopback traffic under the existing test restrictions. No stealth, evasion, or third-party traffic testing is in scope. Reconsider application packet generation only after a concrete authorized test-network use case is documented and explicitly approved.
 
 The user has explicitly authorized development and testing of live capture against self-generated loopback traffic. This authorization does not extend to unrelated hosts or networks; tests must send and inspect only their own localhost probes.
 
@@ -82,7 +82,7 @@ The user has explicitly authorized development and testing of live capture again
 - Parser unit tests and fuzz targets cover boundary lengths, bad offsets, VLAN framing, fragments, and transport headers.
 - No curses operation runs in an asynchronous signal handler, and capture-to-UI communication is bounded.
 - Legacy interaction goals have a documented parity checklist; unsafe behavior is replaced with a deliberate and documented safer equivalent.
-- Payload persistence and packet generation remain disabled unless explicitly requested and acknowledged at runtime.
+- The application remains receive-only and has no packet-generation path; test harnesses generate only their own loopback traffic under the existing test restrictions.
 - ICMP payload display defaults off, is bounded to in-memory Echo samples, and requires the recorded config acknowledgment; persistent logging remains separately gated.
 - The independent project builds and its non-privileged tests pass without touching the legacy tree.
 
