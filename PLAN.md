@@ -2,7 +2,7 @@
 
 ## Goal
 
-Build a separate, defensive C successor to Sniffit that preserves its useful curses workflow while removing the legacy memory-safety, privilege, and reliability problems. Keep `/home/sonik/src/sniffit` unchanged by successor work.
+Build a separate, defensive C successor to Sniffit that preserves its useful curses workflow while removing the legacy memory-safety, privilege, and reliability problems. Keep successor work in the independent nested repository `/home/sonik/src/sniffit/sniffit-ng`; the legacy application remains under `/home/sonik/src/sniffit/sniffit-legacy`.
 
 ## Evidence Driving the Work
 
