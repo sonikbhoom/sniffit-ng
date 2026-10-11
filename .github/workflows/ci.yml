@@ -16,7 +16,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes cmake ninja-build libpcap-dev libncurses-dev
+          sudo apt-get install --yes cmake ninja-build libpcap-dev libncurses-dev libcurl4-openssl-dev
       - name: Configure with sanitizers
         run: >-
           cmake -S . -B build -G Ninja
@@ -33,7 +33,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes clang cmake ninja-build libpcap-dev libncurses-dev
+          sudo apt-get install --yes clang cmake ninja-build libpcap-dev libncurses-dev libcurl4-openssl-dev
       - name: Configure fuzzer
         run: >-
           cmake -S . -B build/fuzz -G Ninja
