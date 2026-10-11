@@ -1,5 +1,20 @@
 # Sniffit NG
 
+## I'm impatient and want to get started right away!
+
+Install a C17 compiler, CMake 3.16 or newer, pkg-config, and libpcap, ncursesw, and libcurl development files. From the project root, configure and build a release executable:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+```
+
+To run the tests after building:
+
+```sh
+ctest --test-dir build --output-on-failure
+```
+
 ## Executive Summary
 
 Sniffit NG is a lightweight terminal network monitor and packet analyzer. Watch a network interface live or open a saved capture. Sniffit groups packets into connections, shows traffic in both directions, and displays selected details about supported protocols. This can help you see whether a connection attempt received a reply and where an exchange may have stopped. It cannot prove that an application worked or determine whether traffic is malicious.
@@ -130,18 +145,3 @@ Set `ui_priority` to a comma-separated list of protocol-qualified ports, for exa
 For TCP/23, the simplified Telnet summary decodes packet-local IAC commands, WILL/WONT/DO/DONT negotiations, recognized option names, and subnegotiation option/length. It omits login text and all subnegotiation values, which may contain credentials, terminal identifiers, or environment data. It does not reassemble TCP streams; split Telnet commands are marked incomplete or may require later packets to interpret.
 
 Researchers can provide a source file at build time with `-DSNIFFIT_NG_CUSTOM_PROTOCOL_DECODER_SOURCE=/path/to/decoder.c`. It must implement `sn_protocol_decode_extension` from `include/sniffit_ng/protocol_decode_extension.h`. The callback receives a read-only, length-bounded IPv4 packet view and returns bounded text that the core sanitizes before display. This is static linking, not a sandbox: compiled extensions can inspect packet data and run with the process user's privileges. The separate built-in payload-inspection setting does not constrain researcher extensions. No researcher decoder or exploit code is included in this project.
-
-## Building
-
-Install a C17 compiler, CMake 3.16 or newer, pkg-config, and libpcap, ncursesw, and libcurl development files. From the project root, configure and build a release executable:
-
-```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
-```
-
-To run the tests after building:
-
-```sh
-ctest --test-dir build --output-on-failure
-```
