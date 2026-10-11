@@ -156,6 +156,10 @@ static int replay_pcap(const char *path,
                        bool payload_logging_enabled,
                        bool pcap_recording_enabled,
                        bool payload_inspection_enabled,
+                       bool show_raw_flows,
+                       bool tainted_extensions,
+                       const enum sn_decoder_mode decoder_modes[
+                           SN_DECODER_MODULE_COUNT],
                        const char *payload_log_path,
                        const char *pcap_output_path)
 {
@@ -202,6 +206,8 @@ static int replay_pcap(const char *path,
 
     sn_monitor_init(&monitor, SN_FLOW_DEFAULT_IDLE_TIMEOUT_NS);
     sn_monitor_set_payload_inspection(&monitor, payload_inspection_enabled);
+    sn_monitor_set_decode_options(&monitor, show_raw_flows, tainted_extensions,
+                                  decoder_modes);
     while ((result = sn_capture_next(capture, &packet, error, sizeof(error))) != SN_CAPTURE_EOF) {
         if (result == SN_CAPTURE_TIMEOUT) {
             continue;
@@ -247,6 +253,10 @@ static int run_live_capture(const char *device,
                             bool promiscuous,
                             bool payload_logging_enabled,
                             bool payload_inspection_enabled,
+                            bool show_raw_flows,
+                            bool tainted_extensions,
+                            const enum sn_decoder_mode decoder_modes[
+                                SN_DECODER_MODULE_COUNT],
                             bool resolve_external_addr,
                             const char *payload_log_path,
                             const char *pcap_output_path)
@@ -320,6 +330,8 @@ static int run_live_capture(const char *device,
 
     sn_monitor_init(&monitor, SN_FLOW_DEFAULT_IDLE_TIMEOUT_NS);
     sn_monitor_set_payload_inspection(&monitor, payload_inspection_enabled);
+    sn_monitor_set_decode_options(&monitor, show_raw_flows, tainted_extensions,
+                                  decoder_modes);
     live.capture = capture;
     live.monitor = &monitor;
     live.payload_log = payload_log;
@@ -414,6 +426,10 @@ int main(int argc, char **argv)
         fprintf(stderr,
                 "sniffit-ng: payload display enabled; inspect only authorized traffic and handle sensitive data ethically\n");
     }
+    if (config.tainted_extensions) {
+        fprintf(stderr,
+                "sniffit-ng: tainted compile-time protocol extensions enabled; extension code is not sandboxed\n");
+    }
     if ((payload_logging_enabled || pcap_output_path != NULL) &&
         !acknowledge_capture_recording()) {
         fprintf(stderr, "sniffit-ng: capture recording was not acknowledged; refusing to continue\n");
@@ -426,11 +442,15 @@ int main(int argc, char **argv)
     if (pcap_path != NULL) {
         return replay_pcap(pcap_path, payload_logging_enabled,
                            pcap_output_path != NULL,
-                           payload_inspection_enabled, payload_log_path,
+                           payload_inspection_enabled, config.show_raw_flows,
+                           config.tainted_extensions, config.decoder_modes,
+                           payload_log_path,
                            pcap_output_path);
     }
     return run_live_capture(interface_name, promiscuous,
                             payload_logging_enabled, payload_inspection_enabled,
+                            config.show_raw_flows, config.tainted_extensions,
+                            config.decoder_modes,
                             config.resolve_external_addr,
                             payload_log_path, pcap_output_path);
 }

@@ -69,6 +69,9 @@ bool sn_config_load_file(const char *path,
     size_t line_number = 0U;
     bool inspect_setting_seen = false;
     bool external_address_setting_seen = false;
+    bool raw_flows_setting_seen = false;
+    bool tainted_extensions_setting_seen = false;
+    bool decoder_setting_seen[SN_DECODER_MODULE_COUNT] = {false};
 
     if (path == NULL || path[0] == '\0' || config == NULL) {
         set_error(error_buffer, error_buffer_size, "invalid config path or output", 0U);
@@ -138,11 +141,59 @@ bool sn_config_load_file(const char *path,
                               "resolve_external_addr must be true or false", line_number);
                     return false;
                 }
+            } else if (strcmp(key, "show_raw_flows") == 0 &&
+                       !raw_flows_setting_seen) {
+                raw_flows_setting_seen = true;
+                if (strcmp(value, "true") == 0) {
+                    config->show_raw_flows = true;
+                } else if (strcmp(value, "false") == 0) {
+                    config->show_raw_flows = false;
+                } else {
+                    fclose(stream);
+                    set_error(error_buffer, error_buffer_size,
+                              "show_raw_flows must be true or false", line_number);
+                    return false;
+                }
+            } else if (strcmp(key, "tainted_extensions") == 0 &&
+                       !tainted_extensions_setting_seen) {
+                tainted_extensions_setting_seen = true;
+                if (strcmp(value, "true") == 0) {
+                    config->tainted_extensions = true;
+                } else if (strcmp(value, "false") == 0) {
+                    config->tainted_extensions = false;
+                } else {
+                    fclose(stream);
+                    set_error(error_buffer, error_buffer_size,
+                              "tainted_extensions must be true or false", line_number);
+                    return false;
+                }
             } else {
-                fclose(stream);
-                set_error(error_buffer, error_buffer_size,
-                          "unknown or duplicate configuration key", line_number);
-                return false;
+                enum sn_decoder_module module;
+
+                if (sn_decoder_module_from_name(key, &module)) {
+                    if (decoder_setting_seen[module]) {
+                        fclose(stream);
+                        set_error(error_buffer, error_buffer_size,
+                                  "unknown or duplicate configuration key", line_number);
+                        return false;
+                    }
+                    decoder_setting_seen[module] = true;
+                    if (strcmp(value, "raw") == 0) {
+                        config->decoder_modes[module] = SN_DECODER_RAW;
+                    } else if (strcmp(value, "simplified") == 0) {
+                        config->decoder_modes[module] = SN_DECODER_SIMPLIFIED;
+                    } else {
+                        fclose(stream);
+                        set_error(error_buffer, error_buffer_size,
+                                  "decoder mode must be raw or simplified", line_number);
+                        return false;
+                    }
+                } else {
+                    fclose(stream);
+                    set_error(error_buffer, error_buffer_size,
+                              "unknown or duplicate configuration key", line_number);
+                    return false;
+                }
             }
         }
     }

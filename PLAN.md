@@ -24,7 +24,7 @@ The source review found packet parsing that does not receive or check libpcap's 
 3. **Safe packet model:** Parse supported link framing and IPv4/TCP/UDP/ICMP using captured-span checks. Validate version, IHL, total length, and transport lengths. Expose payload only as a bounded view. Compute checksum validity without rejecting captures solely because of NIC checksum offload.
 4. **Capture and flow engine:** Add live and offline libpcap sources, selected-interface/link-type validation, explicit filters, bounded flow state, and a bounded event queue. Do not require the whole application to remain root; open capture resources with the least required privilege, then drop privileges.
 5. **Curses parity:** Recreate the connection list, selection/details, masks, packet-rate panel, and familiar key navigation. The UI consumes model events and never parses packets or owns capture handles.
-6. **Output, config, extensions:** Add a validated config parser, restrictive file creation, bounded protocol decoders, and regression fixtures. Prefer built-in bounded decoders over native in-process plugins; evaluate isolated extensions only if there is a concrete need.
+6. **Output, config, extensions:** Add a validated config parser, restrictive file creation, bounded protocol decoders, and regression fixtures. Built-in bounded decoders are the default. Optional researcher decoders are statically linked at build time, selected by per-module runtime config, and require the explicit `tainted_extensions = true` opt-in for every protocol. They run as native in-process code and are not sandboxed; isolation remains a separate future decision if a concrete need arises.
 7. **Hardening and release:** Run compiler warnings/static analysis, ASan/UBSan, parser fuzzing, offline replay tests, and pseudo-terminal UI tests. Document platform support, permissions, threat model, migration limits, and any parity gaps.
 
 ## Inspection Gates
@@ -52,10 +52,17 @@ At each inspection checkpoint, report: deliverable completed, exact command/test
 - **SSH/Telnet emphasis:** TCP sessions involving port 22 or 23 are highlighted in red and sorted to the top, regardless of direction.
 - **Current test status:** The ASan/UBSan suite passed all 18 runnable tests; its live loopback test remains skipped because the sanitizer binary does not have `CAP_NET_RAW`. The non-sanitized loopback test passed separately after the user granted the capability to `build/live/test_capture_live`. Test targets explicitly keep assertions enabled under `NDEBUG`, preventing fixture setup calls inside assertions from disappearing in optimized builds.
 
+## Architecture Review: 2026-10-11
+
+- **Safety and module boundaries:** The C17 build separates packet parsing, capture, flow state, decoding, configuration, privilege handling, and curses UI. Parsing receives captured lengths; the supported Ethernet/SLL plus IPv4 path validates link, IP, and transport spans. Flow count, per-flow histories, and queued monitor events have fixed limits, and counters saturate. Compiler warnings, ASan/UBSan tests, offline fixtures, and a libFuzzer parser target are available. These controls bound resource use; they do not by themselves establish multi-day reliability.
+- **Decoder policy:** Built-in bounded decoders are the default. Optional native HTTP/protocol callbacks are included at build time, selected by runtime per-module mode, and invoked only when `tainted_extensions = true`. This flag is an explicit permission to run trusted in-process code, not a sandbox. Built-in summaries and raw IPv4 metadata do not require the flag. No feature may bypass encryption or access controls.
+- **Long-running monitoring:** The flow table is capped at 256 entries and the monitor event queue at 128. Idle-flow expiry is evaluated while processing packets, not by an independent timer; stale entries can remain visible during silence, though the table stays bounded. Multi-day memory, CPU, counter, and idle-flow behavior remains unverified and is tracked in Functional TODOs.
+- **Terminal workflow and accessibility:** The connection list, detail pane, filters, counters/rates, and familiar keyboard navigation are present; colors have a non-color fallback. The current view requires at least 80 columns by 18 rows, and local/priority cues are not all expressed in text. Screen-reader and low-vision usability have not been validated; track them as interface work rather than claiming accessibility completion.
+
 ## Initial Feature Policy
 
 - Preserve authorized live monitoring, offline pcap replay, filters, counters, connection summaries/details, and conventional logging.
-- Keep payload display user-selected and in-memory by default. Do not automatically identify or extract credentials.
+- Keep payload display user-selected and in-memory by default. Do not automatically identify or extract credentials. Do not bypass encryption or access controls; security advisories and passive metadata summaries are not decryption features.
 - Preserve packet generation only as a separately enabled diagnostic feature, with an explicit startup warning/confirmation and documentation restricting use to authorized test networks.
 - Treat legacy config/CLI compatibility as a migration aid, not as permission to preserve unsafe parsing or ambiguous semantics.
 
@@ -106,6 +113,7 @@ This is the canonical list of open project work. Add newly agreed TODOs here und
 | [ ] | Add selected summary/dump output modes. Keep payload output disabled unless its existing authorization and privacy gates are satisfied. |
 | [ ] | Add CPack generation/content checks to CI and verify install/remove on disposable Debian and RPM systems. RPM transaction testing and native Debian validation remain outstanding. |
 | [ ] | Decide on a project license before inviting reuse or distributing packages for general use. |
+| [ ] | Obtain qualified legal review of authorized-use and anti-circumvention policy, including the DMCA warning, before broad distribution. |
 
 ### Interface Improvements
 
@@ -114,6 +122,7 @@ This is the canonical list of open project work. Add newly agreed TODOs here und
 | [ ] | Choose ICMP detail row width at startup from the terminal dimensions, using the available pane width while preserving aligned offsets and ASCII; define a readable fallback for narrow terminals. |
 | [ ] | Add quick local/remote port and selected-flow filters. Protocol filtering is available on key `5`; `r` resets monitor state and clears active display filters. Clearly distinguish display-only filtering from capture filtering. |
 | [ ] | Add a focus mode for the selected flow or either endpoint host, with a shortcut to apply and clear focus; keep it distinct from source/destination filters and cover it with PTY interaction tests. |
+| [ ] | Improve terminal accessibility: provide text cues in addition to color for local and priority flows, add a useful narrow-terminal fallback below 80x18, and test monochrome, low-color, resize, and screen-reader behavior where supported. |
 | [x] | Highlight TCP sessions involving port 22 or 23 in red and sort them to the top, regardless of traffic direction. |
 
 ### Protocol Decoding Features
@@ -135,7 +144,7 @@ The capture/parser foundation is currently Ethernet plus IPv4. Prioritize decode
 - **HTTP/1.x over TCP:** Implemented for packet-local start lines on ports 80, 8000, and 8080. Summaries include request method/validated Host or response status and allowlisted Server/Content-Type/Content-Length; paths, cookies, authorization headers, and bodies are omitted. TCP stream reassembly is not implemented, so split start lines may be missed. `SNIFFIT_NG_CUSTOM_HTTP_DECODER_SOURCE` is an explicit build-time analyst hook; default implementation is inert, receives one bounded segment, and its output is constrained to printable ASCII.
 - **DNS (UDP and TCP):** Implemented in `src/decode_dns.c`, dispatched on port 53. Flow details show labeled request/response summaries with transaction ID, opcode/status, flags, the first question, section counts, and a typed preview of the first answer (A/AAAA, name records, MX, SRV, SOA). TXT and unknown RDATA contents are hidden; all declared resource-record sections are bounds-checked. Compression pointers must be backward, and traversals are bounded. TCP uses packet-local length framing; split messages/reassembly are not supported.
 - **DHCPv4 / BOOTP (UDP):** Implemented in `src/decode_dhcp4.c` on UDP ports 67/68. Reports BOOTP operation or DHCP message type, transaction ID, hardware type/address, lease duration, and option count. Option iteration is bounded; arbitrary option values are not shown. Tests cover Discover, Offer, BOOTP, and malformed option lengths.
-- **NTP (UDP):** Implemented in `src/decode_ntp.c` and dispatched from UDP port 123. It reports mode, version, leap indicator, stratum, poll/precision, and a hex reference identifier; timestamps are omitted. Focused tests cover valid, short, unsupported-mode, and small-output cases.
+- **NTP (UDP):** Implemented in `src/decode_ntp.c` and dispatched from UDP port 123. Flow details label client requests, server responses, symmetric-peer messages, and broadcasts, with leap/stratum status, poll/precision, and a hex reference identifier. Timestamp fields are omitted. Focused tests cover request/response summaries, short and unsupported messages, and small output buffers.
 - **TLS over TCP:** Implemented for packet-local TLS records on common TLS TCP ports. Summaries include record version/type and handshake type/length only; SNI, certificates, and record contents are not decoded. No TCP stream reassembly.
 - **QUIC over UDP:** Implemented on UDP/443. Reports bounded long-header version/type and connection-ID lengths or short-header payload length; IDs and protected payload are omitted.
 - **RTP/RTCP over UDP:** Implemented on conventional/dynamic media ports. Reports validated RTP header/sequence/timestamp/SSRC or RTCP type/count/length; media bytes and CSRC IDs are omitted.

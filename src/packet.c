@@ -124,6 +124,8 @@ enum sn_packet_result sn_packet_parse_link_ipv4(
         return SN_PACKET_TRUNCATED;
     }
 
+    view->ipv4_packet = ip;
+    view->ipv4_packet_length = ip_total_length;
     memcpy(view->source_ipv4, ip + 12U, sizeof(view->source_ipv4));
     memcpy(view->destination_ipv4, ip + 16U, sizeof(view->destination_ipv4));
     view->protocol = ip[9];

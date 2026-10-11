@@ -60,11 +60,8 @@ bool sn_decode_udp(const struct sn_packet_view *packet,
     }
     if ((source_port == 123U || destination_port == 123U) &&
         sn_decode_ntp(packet->payload, packet->payload_length,
-                      application, sizeof(application))) {
-        return sn_decode_result_fits(snprintf(output, output_capacity,
-                        "UDP %u->%u len=%u payload=%zu; %s",
-                        source_port, destination_port, datagram_length,
-                        packet->payload_length, application), output_capacity);
+                      output, output_capacity)) {
+        return true;
     }
     if ((source_port == 443U || destination_port == 443U) &&
         sn_decode_quic(packet->payload, packet->payload_length,

@@ -80,6 +80,18 @@ void sn_monitor_set_payload_inspection(struct sn_monitor *monitor, bool enabled)
     }
 }
 
+void sn_monitor_set_decode_options(struct sn_monitor *monitor,
+                                   bool show_raw_flows,
+                                   bool tainted_extensions,
+                                   const enum sn_decoder_mode modes[
+                                       SN_DECODER_MODULE_COUNT])
+{
+    if (monitor != NULL) {
+        sn_flow_table_set_decode_options(&monitor->flows, show_raw_flows,
+                                         tainted_extensions, modes);
+    }
+}
+
 void sn_monitor_rate_sampler_init(struct sn_monitor_rate_sampler *sampler)
 {
     if (sampler != NULL) {
@@ -176,7 +188,11 @@ enum sn_monitor_result sn_monitor_process(
     }
     if (parse_result == SN_PACKET_UNSUPPORTED) {
         increment_saturated(&monitor->stats.unsupported_packets);
-        return SN_MONITOR_UNSUPPORTED;
+        if (view.ipv4_total_length == 0U ||
+            (!monitor->flows.show_raw_flows &&
+             !monitor->flows.tainted_extensions)) {
+            return SN_MONITOR_UNSUPPORTED;
+        }
     }
 
     switch (view.protocol) {
@@ -198,8 +214,14 @@ enum sn_monitor_result sn_monitor_process(
         increment_saturated(&monitor->stats.vrrp_packets);
         break;
     default:
-        increment_saturated(&monitor->stats.unsupported_packets);
-        return SN_MONITOR_UNSUPPORTED;
+        if (parse_result != SN_PACKET_UNSUPPORTED) {
+            increment_saturated(&monitor->stats.unsupported_packets);
+        }
+        if (!monitor->flows.show_raw_flows &&
+            !monitor->flows.tainted_extensions) {
+            return SN_MONITOR_UNSUPPORTED;
+        }
+        break;
     }
 
     flow_result = sn_flow_table_update(&monitor->flows, &view, timestamp_ns, &flow);

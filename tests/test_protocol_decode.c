@@ -1,11 +1,274 @@
 #include "sniffit_ng/protocol_decode.h"
 #include "sniffit_ng/http_decode_extension.h"
+#include "sniffit_ng/protocol_decode_extension.h"
 #include "decode_placeholder_internal.h"
 #include "protocol_decode_internal.h"
 
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+
+static unsigned int protocol_extension_calls;
+static unsigned int http_extension_calls;
+
+bool sn_http_decode_extension(const uint8_t *payload,
+                              size_t payload_length,
+                              char *output,
+                              size_t output_capacity)
+{
+    static const char extension_text[] = "researcher";
+
+    ++http_extension_calls;
+    if (payload == NULL || payload_length == 0U || output == NULL ||
+        output_capacity < sizeof(extension_text)) {
+        return false;
+    }
+    memcpy(output, extension_text, sizeof(extension_text));
+    return true;
+}
+
+bool sn_protocol_decode_extension(const struct sn_packet_view *packet,
+                                  char *output,
+                                  size_t output_capacity)
+{
+    static const char extension_text[] = "researcher\001summary";
+    bool test_protocol = packet != NULL && packet->protocol == 253U;
+    bool dns_protocol = packet != NULL && packet->protocol == 17U &&
+                        packet->transport != NULL &&
+                        packet->transport_length >= 4U &&
+                        ((packet->transport[0] == 0U && packet->transport[1] == 53U) ||
+                         (packet->transport[2] == 0U && packet->transport[3] == 53U));
+    bool telnet_protocol = packet != NULL && packet->protocol == 6U &&
+                           packet->transport != NULL &&
+                           packet->transport_length >= 4U &&
+                           (packet->transport[1] == 23U ||
+                            packet->transport[3] == 23U);
+    bool tls_protocol = packet != NULL && packet->protocol == 6U &&
+                        packet->transport != NULL &&
+                        packet->transport_length >= 4U &&
+                        ((((uint16_t)packet->transport[0] << 8) |
+                         packet->transport[1]) == 443U ||
+                        (((uint16_t)packet->transport[2] << 8) |
+                         packet->transport[3]) == 443U);
+        bool icmp_protocol = packet != NULL && packet->protocol == 1U;
+        bool ftp_protocol = packet != NULL && packet->protocol == 6U &&
+                        packet->transport != NULL &&
+                        packet->transport_length >= 4U &&
+                        (((uint16_t)packet->transport[0] << 8) |
+                        packet->transport[1]) == 21U;
+        bool radius_protocol = packet != NULL && packet->protocol == 17U &&
+                          packet->transport != NULL &&
+                          packet->transport_length >= 4U &&
+                          packet->transport[3] == 0x14U &&
+                          (packet->transport[2] == 0x07U ||
+                           packet->transport[2] == 0x06U);
+        bool snmp_protocol = packet != NULL && packet->protocol == 17U &&
+                        packet->transport != NULL &&
+                        packet->transport_length >= 4U &&
+                        packet->transport[3] == 161U &&
+                        packet->payload != NULL && packet->payload_length >= 5U &&
+                        packet->payload[0] == 0x30U &&
+                        packet->payload[2] == 0x02U &&
+                        packet->payload[3] == 1U &&
+                        packet->payload[4] <= 1U;
+
+    ++protocol_extension_calls;
+        if ((!test_protocol && !dns_protocol && !telnet_protocol && !tls_protocol &&
+            !icmp_protocol && !ftp_protocol && !snmp_protocol && !radius_protocol) ||
+        output == NULL ||
+        output_capacity < sizeof(extension_text)) {
+        return false;
+    }
+    memcpy(output, extension_text, sizeof(extension_text));
+    return true;
+}
+
+static void test_tainted_extension_gate_and_output_sanitizing(void)
+{
+    uint8_t ipv4_packet[20] = {0};
+    struct sn_packet_view packet = {0};
+    char output[SN_PACKET_DECODE_TEXT_CAPACITY];
+
+    packet.protocol = 253U;
+    packet.ipv4_packet = ipv4_packet;
+    packet.ipv4_packet_length = sizeof(ipv4_packet);
+    packet.ipv4_total_length = sizeof(ipv4_packet);
+    packet.ipv4_header_length = sizeof(ipv4_packet);
+
+    protocol_extension_calls = 0U;
+    assert(!sn_protocol_decode_with_extension(&packet, output, sizeof(output), false));
+    assert(protocol_extension_calls == 0U);
+
+    assert(sn_protocol_decode_with_extension(&packet, output, sizeof(output), true));
+    assert(protocol_extension_calls == 1U);
+    assert(strcmp(output, "researcher.summary") == 0);
+
+    output[0] = 'x';
+    assert(!sn_protocol_decode_with_extension(&packet, output, 4U, true));
+    assert(output[0] == '\0');
+}
+
+static void test_protocol_mode_selects_extension_or_simplified_decoder(void)
+{
+    uint8_t ipv4_packet[40] = {0};
+    uint8_t udp[8] = {0U, 53U, 0x14U, 0xe9U, 0U, 8U, 0U, 0U};
+    struct sn_packet_view packet = {0};
+    enum sn_decoder_mode modes[SN_DECODER_MODULE_COUNT] = {0};
+    char output[SN_PACKET_DECODE_TEXT_CAPACITY];
+
+    packet.protocol = 17U;
+    packet.transport = udp;
+    packet.transport_length = sizeof(udp);
+    packet.transport_header_present = true;
+    packet.ipv4_packet = ipv4_packet;
+    packet.ipv4_packet_length = sizeof(ipv4_packet);
+    packet.ipv4_total_length = sizeof(ipv4_packet);
+    packet.ipv4_header_length = 20U;
+    modes[SN_DECODER_DNS] = SN_DECODER_RAW;
+
+    protocol_extension_calls = 0U;
+    assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
+                                         false, false, modes));
+    assert(protocol_extension_calls == 0U);
+    assert(strstr(output, "IPv4 protocol=17") != NULL);
+    assert(strstr(output, "researcher.summary") == NULL);
+    assert(strstr(output, "SECURITY: WEAK; DNS on port 53") != NULL);
+
+    protocol_extension_calls = 0U;
+    assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
+                                         false, true, modes));
+    assert(protocol_extension_calls == 1U);
+    assert(strstr(output, "researcher.summary") != NULL);
+    assert(strstr(output, "SECURITY: WEAK; DNS on port 53") != NULL);
+
+    modes[SN_DECODER_DNS] = SN_DECODER_SIMPLIFIED;
+    protocol_extension_calls = 0U;
+    assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
+                                         false, true, modes));
+    assert(protocol_extension_calls == 0U);
+    assert(strstr(output, "UDP 53->5353") != NULL);
+
+    packet.protocol = 6U;
+    packet.transport = NULL;
+    packet.transport_length = 0U;
+    packet.transport_header_present = false;
+    assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
+                                         true, false, modes));
+    assert(strstr(output, "IPv4 protocol=6") != NULL);
+
+    uint8_t tcp[20] = {0};
+    tcp[1] = 23U;
+    tcp[12] = 0x50U;
+    packet.protocol = 6U;
+    packet.transport = tcp;
+    packet.transport_length = sizeof(tcp);
+    packet.transport_header_present = true;
+    packet.ipv4_packet_length = 40U;
+    packet.ipv4_total_length = 40U;
+    modes[SN_DECODER_TELNET] = SN_DECODER_SIMPLIFIED;
+    assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
+                                         false, false, modes));
+    assert(strstr(output, "SECURITY: WEAK; Telnet exposes credentials") != NULL);
+
+    modes[SN_DECODER_TELNET] = SN_DECODER_RAW;
+    protocol_extension_calls = 0U;
+    assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
+                                         false, false, modes));
+    assert(protocol_extension_calls == 0U);
+    assert(strstr(output, "IPv4 protocol=6") != NULL);
+    assert(strstr(output, "SECURITY: WEAK; Telnet") != NULL);
+    assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
+                                         false, true, modes));
+    assert(protocol_extension_calls == 1U);
+    assert(strstr(output, "researcher.summary") != NULL);
+
+    tcp[0] = 1U;
+    tcp[1] = 187U;
+    modes[SN_DECODER_TLS] = SN_DECODER_RAW;
+    protocol_extension_calls = 0U;
+    assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
+                                         false, false, modes));
+    assert(protocol_extension_calls == 0U);
+    assert(strstr(output, "IPv4 protocol=6") != NULL);
+    assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
+                                         false, true, modes));
+    assert(protocol_extension_calls == 1U);
+
+    uint8_t icmp[8] = {8U, 0U, 0U, 0U};
+    packet.protocol = 1U;
+    packet.transport = icmp;
+    packet.transport_length = sizeof(icmp);
+    packet.transport_header_present = true;
+    packet.icmp_type = 8U;
+    modes[SN_DECODER_ICMP] = SN_DECODER_RAW;
+    protocol_extension_calls = 0U;
+    assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
+                                         false, false, modes));
+    assert(protocol_extension_calls == 0U);
+    assert(strstr(output, "IPv4 protocol=1") != NULL);
+    assert(strstr(output, "SECURITY: unencrypted and unauthenticated") != NULL);
+    assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
+                                         false, true, modes));
+    assert(protocol_extension_calls == 1U);
+
+    tcp[0] = 0U;
+    tcp[1] = 21U;
+    modes[SN_DECODER_TCP] = SN_DECODER_RAW;
+    packet.protocol = 6U;
+    packet.transport = tcp;
+    packet.transport_length = sizeof(tcp);
+    protocol_extension_calls = 0U;
+    assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
+                                         false, false, modes));
+    assert(protocol_extension_calls == 0U);
+    assert(strstr(output, "IPv4 protocol=6") != NULL);
+    assert(strstr(output, "SECURITY: WEAK; legacy TCP service") != NULL);
+    assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
+                                         false, true, modes));
+    assert(protocol_extension_calls == 1U);
+
+    uint8_t snmp_udp[8] = {0U, 161U, 0U, 0U, 0U, 8U, 0U, 0U};
+    uint8_t snmp[5] = {0x30U, 3U, 0x02U, 1U, 1U};
+    packet.protocol = 17U;
+    packet.transport = snmp_udp;
+    packet.transport_length = sizeof(snmp_udp);
+    packet.payload = snmp;
+    packet.payload_length = sizeof(snmp);
+    packet.ipv4_packet_length = 33U;
+    packet.ipv4_total_length = 33U;
+    modes[SN_DECODER_SNMP] = SN_DECODER_RAW;
+    protocol_extension_calls = 0U;
+    assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
+                                         false, false, modes));
+    assert(protocol_extension_calls == 0U);
+    assert(strstr(output, "IPv4 protocol=17") != NULL);
+    assert(strstr(output, "SNMPv1/v2c community strings are cleartext") != NULL);
+    assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
+                                         false, true, modes));
+    assert(protocol_extension_calls == 1U);
+    assert(strstr(output, "SNMPv1/v2c community strings are cleartext") != NULL);
+
+    snmp[4] = 3U;
+    protocol_extension_calls = 0U;
+    assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
+                                         false, false, modes));
+    assert(protocol_extension_calls == 0U);
+
+    snmp_udp[0] = 0x9cU;
+    snmp_udp[1] = 0x40U;
+    snmp_udp[2] = 0x07U;
+    snmp_udp[3] = 0x14U;
+    modes[SN_DECODER_RADIUS] = SN_DECODER_RAW;
+    protocol_extension_calls = 0U;
+    assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
+                                         false, false, modes));
+    assert(protocol_extension_calls == 0U);
+    assert(strstr(output, "RADIUS attributes are not encrypted") != NULL);
+    assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
+                                         false, true, modes));
+    assert(protocol_extension_calls == 1U);
+    assert(strstr(output, "RADIUS attributes are not encrypted") != NULL);
+}
 
 static void test_tcp_and_udp_metadata(void)
 {
@@ -85,6 +348,7 @@ static void test_http_summaries_hide_paths_and_sensitive_headers(void)
     assert(strstr(output, "secret") == NULL);
     assert(strstr(output, "private-token") == NULL);
     assert(strstr(output, "private-cookie") == NULL);
+    assert(http_extension_calls == 0U);
 
     tcp[0] = 0U;
     tcp[1] = 80U;
@@ -99,6 +363,7 @@ static void test_http_summaries_hide_paths_and_sensitive_headers(void)
     assert(strstr(output, "type=text/html") != NULL);
     assert(strstr(output, "bytes=125") != NULL);
     assert(strstr(output, "private-cookie") == NULL);
+    assert(http_extension_calls == 0U);
 
     tcp[0] = 0x01U;
     tcp[1] = 0xbbU;
@@ -113,16 +378,36 @@ static void test_http_summaries_hide_paths_and_sensitive_headers(void)
     packet.transport_length = sizeof(tcp) + sizeof(partial) - 1U;
     assert(sn_protocol_decode(&packet, output, sizeof(output)));
     assert(strstr(output, "HTTP") == NULL);
+
+    enum sn_decoder_mode modes[SN_DECODER_MODULE_COUNT] = {0};
+    modes[SN_DECODER_HTTP] = SN_DECODER_SIMPLIFIED;
+    tcp[0] = 0x9cU;
+    tcp[1] = 0x40U;
+    tcp[2] = 0U;
+    tcp[3] = 80U;
+    tcp[12] = 0x50U;
+    packet.payload = request;
+    packet.payload_length = sizeof(request) - 1U;
+    packet.transport_length = sizeof(tcp) + sizeof(request) - 1U;
+    http_extension_calls = 0U;
+    assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
+                                         false, false, modes));
+    assert(http_extension_calls == 0U);
+    assert(strstr(output, "custom=") == NULL);
+    assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
+                                         false, true, modes));
+    assert(http_extension_calls == 1U);
+    assert(strstr(output, "custom=researcher") != NULL);
 }
 
-static void test_http_extension_is_disabled_by_default(void)
+static void test_http_extension_output_contract(void)
 {
     static const uint8_t payload[] = "GET /secret HTTP/1.1\r\nHost: example.test\r\n\r\n";
     char output[SN_HTTP_EXTENSION_OUTPUT_CAPACITY] = "not empty";
 
-    assert(!sn_http_decode_extension(payload, sizeof(payload) - 1U,
-                                     output, sizeof(output)));
-    assert(output[0] == '\0');
+    assert(sn_http_decode_extension(payload, sizeof(payload) - 1U,
+                                    output, sizeof(output)));
+    assert(strcmp(output, "researcher") == 0);
 }
 
 static void test_dns_udp_tcp_and_compression_bounds(void)
@@ -152,6 +437,7 @@ static void test_dns_udp_tcp_and_compression_bounds(void)
     assert(sn_protocol_decode(&packet, output, sizeof(output)));
     assert(strstr(output, "DNS REQUEST id=0x1234 opcode=QUERY RD=1") != NULL);
     assert(strstr(output, "Question: www.example.com A/IN") != NULL);
+    assert(strstr(output, "SECURITY: WEAK; DNS on port 53") != NULL);
 
     memcpy(response, query, sizeof(query));
     response[2] = 0x81U;
@@ -189,7 +475,9 @@ static void test_dns_udp_tcp_and_compression_bounds(void)
     packet.payload_length = sizeof(malformed);
     assert(sn_protocol_decode(&packet, output, sizeof(output)));
     assert(strstr(output, "UDP 12345->53") != NULL);
-    assert(strstr(output, "DNS") == NULL);
+    assert(strstr(output, "DNS REQUEST") == NULL);
+    assert(strstr(output, "Question:") == NULL);
+    assert(strstr(output, "SECURITY: WEAK; DNS on port 53") != NULL);
 
     tcp[0] = 0x30U;
     tcp[1] = 0x39U;
@@ -269,9 +557,7 @@ static void test_dns_maximum_wire_name_is_bounded_in_output(void)
     packet.payload_length = sizeof(query);
     assert(sn_protocol_decode(&packet, output, sizeof(output)));
     assert(strstr(output, "DNS REQUEST id=0x5679") != NULL);
-    assert(output[sizeof(output) - 4U] == '.');
-    assert(output[sizeof(output) - 3U] == '.');
-    assert(output[sizeof(output) - 2U] == '.');
+    assert(strstr(output, "... | SECURITY: WEAK; DNS on port 53") != NULL);
     assert(output[sizeof(output) - 1U] == '\0');
 }
 
@@ -331,7 +617,8 @@ static void test_dhcp4_discover_offer_and_malformed_options(void)
     message[244] = 10U;
     assert(sn_protocol_decode(&packet, output, sizeof(output)));
     assert(strstr(output, "UDP 68->67") != NULL);
-    assert(strstr(output, "DHCPv4") == NULL);
+    assert(strstr(output, "DHCPv4 Discover") == NULL);
+    assert(strstr(output, "DHCPv4 Offer") == NULL);
 
     packet.payload_length = 236U;
     packet.transport_length = sizeof(udp) + packet.payload_length;
@@ -489,7 +776,7 @@ static void test_syslog_radius_tacacs_metadata(void)
     radius[21] = 9U;
     assert(sn_protocol_decode(&packet, output, sizeof(output)));
     assert(strstr(output, "UDP 1812->50000") != NULL);
-    assert(strstr(output, "RADIUS") == NULL);
+    assert(strstr(output, "RADIUS Access-") == NULL);
 
     packet.protocol = 6U;
     packet.transport = tcp;
@@ -525,17 +812,27 @@ static void test_ntp_metadata_and_validation(void)
     packet.payload = ntp;
     packet.payload_length = sizeof(ntp);
     assert(sn_protocol_decode(&packet, output, sizeof(output)));
-    assert(strstr(output, "UDP 123->40000") != NULL);
-    assert(strstr(output, "NTP v4 server LI=0 stratum=2 poll=6 precision=-20") != NULL);
+    assert(strstr(output, "NTP SERVER RESPONSE v4") != NULL);
+    assert(strstr(output, "SECURITY: WEAK; NTP") != NULL);
+    assert(strstr(output, "Status: leap=no-warning stratum=2 (secondary)") != NULL);
+    assert(strstr(output, "Parameters: poll=6 precision=-20") != NULL);
     assert(strstr(output, "refid=47505300") != NULL);
     assert(strstr(output, "timestamp") == NULL);
+    assert(strstr(output, "UDP 123->40000") == NULL);
+
+    ntp[0] = 0x23U;
+    ntp[1] = 0U;
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "NTP CLIENT REQUEST v4") != NULL);
+    assert(strstr(output, "stratum=0 (unspecified/KoD)") != NULL);
 
     packet.payload_length = sizeof(ntp) - 1U;
     udp[5] = 55U;
     packet.transport_length = 55U;
     assert(sn_protocol_decode(&packet, output, sizeof(output)));
     assert(strstr(output, "UDP 123->40000") != NULL);
-    assert(strstr(output, "NTP") == NULL);
+    assert(strstr(output, "NTP SERVER RESPONSE") == NULL);
+    assert(strstr(output, "SECURITY: WEAK; NTP") != NULL);
 
     packet.payload_length = sizeof(ntp);
     udp[5] = 56U;
@@ -543,7 +840,8 @@ static void test_ntp_metadata_and_validation(void)
     ntp[0] = 0x27U;
     assert(sn_protocol_decode(&packet, output, sizeof(output)));
     assert(strstr(output, "UDP 123->40000") != NULL);
-    assert(strstr(output, "NTP") == NULL);
+    assert(strstr(output, "NTP SERVER RESPONSE") == NULL);
+    assert(strstr(output, "SECURITY: WEAK; NTP") != NULL);
 
     char tiny_output[1] = {'x'};
     assert(!sn_decode_ntp(ntp, sizeof(ntp), tiny_output, sizeof(tiny_output)));
@@ -638,6 +936,7 @@ static void test_igmp_vrrp_and_icmp(void)
     packet.icmp_sequence = 7U;
     assert(sn_protocol_decode(&packet, output, sizeof(output)));
     assert(strstr(output, "ICMP Echo request") != NULL);
+    assert(strstr(output, "SECURITY: unencrypted and unauthenticated") != NULL);
 }
 
 static void test_invalid_decoder_arguments(void)
@@ -682,9 +981,11 @@ static void test_protocol_placeholders_are_inert(void)
 
 int main(void)
 {
+    test_tainted_extension_gate_and_output_sanitizing();
+    test_protocol_mode_selects_extension_or_simplified_decoder();
     test_tcp_and_udp_metadata();
     test_http_summaries_hide_paths_and_sensitive_headers();
-    test_http_extension_is_disabled_by_default();
+    test_http_extension_output_contract();
     test_dns_udp_tcp_and_compression_bounds();
     test_dns_txt_content_stays_hidden();
     test_dns_maximum_wire_name_is_bounded_in_output();

@@ -85,7 +85,11 @@ Only monitor systems and networks you own or are explicitly authorized to inspec
 
 External address lookup is off by default. To opt in, add `resolve_external_addr = true` to the config file. If the selected live interface has an RFC 1918 IPv4 address, Sniffit makes one HTTPS request to `https://ifconfig.io/ip` at startup and shows the returned address in the title bar. The service can observe your public network address. No request is made for offline replay, public interface addresses, or when the setting is absent or false. If the lookup fails, monitoring continues with local interface information only.
 
-Normal flow summaries and protocol details do not display packet contents. Full-packet recording and payload viewing are more sensitive and remain separate, opt-in features.
+Built-in flow summaries and protocol details do not display packet contents. A researcher-supplied raw extension can emit sensitive information, so treat its output as potentially sensitive. Full-packet recording and built-in payload viewing are separate, opt-in features.
+
+Do not use Sniffit NG or an extension to bypass encryption or access controls. Circumvention may violate applicable law, including anti-circumvention provisions of the U.S. DMCA (17 U.S.C. 1201); laws, exceptions, and exemptions vary by jurisdiction and circumstance. This project is not legal advice. See the [U.S. Copyright Office DMCA information](https://www.copyright.gov/dmca/).
+
+**TODO:** Obtain qualified legal review of the project's anti-circumvention and authorized-analysis policy before broad distribution.
 
 A pcap file can contain complete packet contents. `--write-pcap FILE` therefore requires an interactive privacy and authorization acknowledgment. Sniffit creates a new owner-only file and refuses to overwrite an existing file. Live recording starts only after capture privileges have been dropped.
 
@@ -101,6 +105,12 @@ inspect_payloads = true
 ```
 
 The config is read from `$XDG_CONFIG_HOME/sniffit-ng/config` or `~/.config/sniffit-ng/config`. Use `--config FILE` to select another file. The `--inspect-payloads` option also requires the acknowledgment in the loaded config. Missing acknowledgment fails closed. The example config keeps inspection disabled and the acknowledgment commented out. This acknowledgment applies only to in-memory ICMP Echo samples; payload logging and pcap recording each require their own interactive acknowledgment.
+
+### Decoder Modes and Extensions
+
+`show_raw_flows = true` adds bounded IPv4 metadata flows for protocols without a built-in summary; it does not display packet bytes. Decoder keys accept `simplified` or `raw` for the currently dispatched modules: `icmp`, `igmp`, `tcp`, `http`, `telnet`, `dns`, `tls`, `tacacs`, `syslog`, `udp`, `dhcp4`, `snmp`, `ntp`, `quic`, `rtp`, `rtcp`, `radius`, and `vrrp`. Modes default to `simplified` and are selected at runtime through config. Researcher-supplied HTTP and protocol extensions are included at build time and require `tainted_extensions = true` for every protocol; this is explicit opt-in, not sandboxing. `show_raw_flows` and built-in summaries do not require taint opt-in. Decoder summaries include protocol-level security advisories for services such as Telnet, DNS, NTP, ICMP, SNMPv1/v2c, and RADIUS. These advisories describe protocol or service risks, not the security of every deployment.
+
+Researchers can provide a source file at build time with `-DSNIFFIT_NG_CUSTOM_PROTOCOL_DECODER_SOURCE=/path/to/decoder.c`. It must implement `sn_protocol_decode_extension` from `include/sniffit_ng/protocol_decode_extension.h`. The callback receives a read-only, length-bounded IPv4 packet view and returns bounded text that the core sanitizes before display. This is static linking, not a sandbox: compiled extensions can inspect packet data and run with the process user's privileges. The separate built-in payload-inspection setting does not constrain researcher extensions. No researcher decoder or exploit code is included in this project.
 
 ## Building
 

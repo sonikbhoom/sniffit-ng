@@ -16,7 +16,8 @@ static uint32_t read_be32(const uint8_t *bytes)
 
 bool sn_decode_tcp(const struct sn_packet_view *packet,
                    char *output,
-                   size_t output_capacity)
+                   size_t output_capacity,
+                   bool tainted_extensions)
 {
     size_t header_length;
     const uint8_t *tcp;
@@ -42,7 +43,7 @@ bool sn_decode_tcp(const struct sn_packet_view *packet,
          source_port == 8000U || destination_port == 8000U ||
          source_port == 8080U || destination_port == 8080U) &&
         sn_decode_http(packet->payload, packet->payload_length,
-                       application, sizeof(application))) {
+                       application, sizeof(application), tainted_extensions)) {
         formatted_length = snprintf(output, output_capacity,
                     "TCP %u->%u flags=0x%02x seq=%u ack=%u win=%u payload=%zu; %s",
                     source_port, destination_port, tcp[13],

@@ -78,6 +78,12 @@ void sn_monitor_init(struct sn_monitor *monitor, uint64_t idle_timeout_ns);
 
 void sn_monitor_set_payload_inspection(struct sn_monitor *monitor, bool enabled);
 
+void sn_monitor_set_decode_options(struct sn_monitor *monitor,
+                                   bool show_raw_flows,
+                                   bool tainted_extensions,
+                                   const enum sn_decoder_mode modes[
+                                       SN_DECODER_MODULE_COUNT]);
+
 void sn_monitor_rate_sampler_init(struct sn_monitor_rate_sampler *sampler);
 
 bool sn_monitor_rate_sample(

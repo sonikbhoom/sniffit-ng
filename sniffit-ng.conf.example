@@ -7,6 +7,35 @@ inspect_payloads = false
 # to ifconfig.io when live capture starts.
 resolve_external_addr = false
 
+# Show bounded IPv4 metadata when no built-in simple decoder exists.
+show_raw_flows = false
+
+# Enable statically linked researcher-supplied protocol extensions.
+# Compiled extension code is trusted executable code and is not sandboxed.
+tainted_extensions = false
+
+# Decoder keys accept "raw" or "simplified". Researcher-supplied extensions
+# for every module require tainted_extensions = true; native extensions are
+# trusted in-process code, not sandboxed. Built-in summaries need no taint opt-in.
+icmp = simplified
+igmp = simplified
+tcp = simplified
+http = simplified
+dns = simplified
+tls = simplified
+tacacs = simplified
+syslog = simplified
+udp = simplified
+dhcp4 = simplified
+snmp = simplified
+ntp = simplified
+quic = simplified
+rtp = simplified
+rtcp = simplified
+radius = simplified
+vrrp = simplified
+telnet = simplified
+
 # To acknowledge payload inspection, enable the option and make the next line active
 # by removing its leading '# ' characters. This acknowledgment is stored in this
 # config file and will not be prompted on every run.

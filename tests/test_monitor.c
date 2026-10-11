@@ -77,6 +77,29 @@ static size_t make_group_protocol_frame(uint8_t *frame, uint8_t protocol)
     return ETHERNET_LENGTH + IPV4_LENGTH + transport_length;
 }
 
+static size_t make_unknown_protocol_frame(uint8_t *frame, uint8_t protocol)
+{
+    uint8_t *ip = frame + ETHERNET_LENGTH;
+    uint8_t *payload = ip + IPV4_LENGTH;
+    size_t payload_length = 4U;
+
+    memset(frame, 0, FRAME_LENGTH);
+    write_be16(frame + 12U, 0x0800U);
+    ip[0] = 0x45U;
+    write_be16(ip + 2U, IPV4_LENGTH + (uint16_t)payload_length);
+    ip[8] = 64U;
+    ip[9] = protocol;
+    ip[12] = 192U;
+    ip[15] = 1U;
+    ip[16] = 192U;
+    ip[19] = 2U;
+    payload[0] = 0xdeU;
+    payload[1] = 0xadU;
+    payload[2] = 0xbeU;
+    payload[3] = 0xefU;
+    return ETHERNET_LENGTH + IPV4_LENGTH + payload_length;
+}
+
 static struct sn_capture_packet capture_packet(uint8_t *frame, size_t length, long seconds)
 {
     struct sn_capture_packet packet = {0};
@@ -161,6 +184,37 @@ static void test_igmp_and_vrrp_capture_to_decoded_flows(void)
     assert(strstr(event.flow.decode_history[0].text, "VRRPv2 advert") != NULL);
 }
 
+static void test_unknown_protocol_raw_flow_is_opt_in_and_metadata_only(void)
+{
+    struct sn_monitor monitor;
+    struct sn_monitor_event event;
+    uint8_t frame[FRAME_LENGTH];
+    struct sn_capture_packet packet;
+    size_t frame_length = make_unknown_protocol_frame(frame, 253U);
+
+    sn_monitor_init(&monitor, UINT64_MAX);
+    packet = capture_packet(frame, frame_length, 100L);
+    assert(sn_monitor_process(&monitor, &packet) == SN_MONITOR_UNSUPPORTED);
+    assert(sn_flow_table_count(&monitor.flows) == 0U);
+
+    sn_monitor_set_decode_options(&monitor, true, false, NULL);
+    packet = capture_packet(frame, frame_length, 101L);
+    assert(sn_monitor_process(&monitor, &packet) == SN_MONITOR_PROCESSED);
+    assert(sn_monitor_next_event(&monitor, &event));
+    assert(event.flow.protocol == 253U);
+    assert(event.flow.decode_history_count == 1U);
+    assert(strstr(event.flow.decode_history[0].text, "IPv4 protocol=253") != NULL);
+    assert(strstr(event.flow.decode_history[0].text, "deadbeef") == NULL);
+
+    sn_monitor_init(&monitor, UINT64_MAX);
+    sn_monitor_set_decode_options(&monitor, false, true, NULL);
+    packet = capture_packet(frame, frame_length, 102L);
+    assert(sn_monitor_process(&monitor, &packet) == SN_MONITOR_PROCESSED);
+    assert(sn_monitor_next_event(&monitor, &event));
+    assert(event.flow.decode_history_count == 1U);
+    assert(strstr(event.flow.decode_history[0].text, "IPv4 protocol=253") != NULL);
+}
+
 static void test_sll_ntp_reply_reaches_flow_decoder(void)
 {
     uint8_t frame[16U + IPV4_LENGTH + 8U + 48U] = {0};
@@ -205,7 +259,11 @@ static void test_sll_ntp_reply_reaches_flow_decoder(void)
     assert(event.flow.protocol == 17U);
     assert(event.flow.decode_history_count == 1U);
     assert(strstr(event.flow.decode_history[0].text,
-                  "NTP v4 server LI=0 stratum=2 poll=0 precision=-25 refid=84f60be7") != NULL);
+                  "NTP SERVER RESPONSE v4") != NULL);
+    assert(strstr(event.flow.decode_history[0].text,
+                  "Status: leap=no-warning stratum=2 (secondary)") != NULL);
+    assert(strstr(event.flow.decode_history[0].text,
+                  "precision=-25 refid=84f60be7") != NULL);
 }
 
 static void test_bounded_event_queue_drops_newest(void)
@@ -289,6 +347,7 @@ int main(void)
     test_capture_to_flow_events();
     test_reject_bad_frames_without_flow_events();
     test_igmp_and_vrrp_capture_to_decoded_flows();
+    test_unknown_protocol_raw_flow_is_opt_in_and_metadata_only();
     test_sll_ntp_reply_reaches_flow_decoder();
     test_bounded_event_queue_drops_newest();
     test_three_second_rate_sampling_and_reset();

@@ -48,6 +48,9 @@ struct sn_flow_table {
     struct sn_flow entries[SN_FLOW_TABLE_CAPACITY];
     uint64_t idle_timeout_ns;
     bool inspect_payloads;
+    bool show_raw_flows;
+    bool tainted_extensions;
+    enum sn_decoder_mode decoder_modes[SN_DECODER_MODULE_COUNT];
 };
 
 enum sn_flow_update_result {
@@ -61,6 +64,12 @@ enum sn_flow_update_result {
 void sn_flow_table_init(struct sn_flow_table *table, uint64_t idle_timeout_ns);
 
 void sn_flow_table_set_payload_inspection(struct sn_flow_table *table, bool enabled);
+
+void sn_flow_table_set_decode_options(struct sn_flow_table *table,
+                                      bool show_raw_flows,
+                                      bool tainted_extensions,
+                                      const enum sn_decoder_mode modes[
+                                          SN_DECODER_MODULE_COUNT]);
 
 enum sn_flow_update_result sn_flow_table_update(
     struct sn_flow_table *table,

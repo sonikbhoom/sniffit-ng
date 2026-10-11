@@ -12,13 +12,31 @@ static int read_signed_byte(uint8_t value)
 static const char *mode_name(uint8_t mode)
 {
     switch (mode) {
-    case 1U: return "symmetric-active";
-    case 2U: return "symmetric-passive";
-    case 3U: return "client";
-    case 4U: return "server";
-    case 5U: return "broadcast";
+    case 1U: return "PEER MESSAGE (symmetric-active)";
+    case 2U: return "PEER MESSAGE (symmetric-passive)";
+    case 3U: return "CLIENT REQUEST";
+    case 4U: return "SERVER RESPONSE";
+    case 5U: return "BROADCAST";
     default: return NULL;
     }
+}
+
+static const char *leap_indicator_name(uint8_t leap_indicator)
+{
+    switch (leap_indicator) {
+    case 0U: return "no-warning";
+    case 1U: return "insert-second";
+    case 2U: return "delete-second";
+    default: return "unsynchronized";
+    }
+}
+
+static const char *stratum_name(uint8_t stratum)
+{
+    if (stratum == 0U) {
+        return "unspecified/KoD";
+    }
+    return stratum == 1U ? "primary" : "secondary";
 }
 
 bool sn_decode_ntp(const uint8_t *bytes,
@@ -49,8 +67,11 @@ bool sn_decode_ntp(const uint8_t *bytes,
     }
 
     formatted_length = snprintf(output, output_capacity,
-                                "NTP v%u %s LI=%u stratum=%u poll=%d precision=%d refid=%02x%02x%02x%02x",
-                                version, mode_name(mode), leap_indicator, stratum,
+                                "NTP %s v%u\nStatus: leap=%s stratum=%u (%s)\n"
+                                "Parameters: poll=%d precision=%d refid=%02x%02x%02x%02x",
+                                mode_name(mode), version,
+                                leap_indicator_name(leap_indicator), stratum,
+                                stratum_name(stratum),
                                 read_signed_byte(bytes[2]), read_signed_byte(bytes[3]),
                                 bytes[12], bytes[13], bytes[14], bytes[15]);
     if (!sn_decode_result_fits(formatted_length, output_capacity)) {

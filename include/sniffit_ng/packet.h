@@ -29,6 +29,8 @@ struct sn_packet_view {
     bool more_fragments;
     bool transport_header_present;
     bool ipv4_checksum_valid;
+    const uint8_t *ipv4_packet;
+    size_t ipv4_packet_length;
     size_t ipv4_header_length;
     size_t ipv4_total_length;
     const uint8_t *transport;

@@ -230,14 +230,16 @@ static bool output_fits(int formatted_length, char *output, size_t output_capaci
 static bool append_custom_metadata(const uint8_t *bytes,
                                    size_t length,
                                    char *output,
-                                   size_t output_capacity)
+                                   size_t output_capacity,
+                                   bool tainted_extensions)
 {
     char extension[SN_HTTP_EXTENSION_OUTPUT_CAPACITY] = {0};
     size_t extension_length = 0U;
     size_t output_length;
     int formatted_length;
 
-    if (!sn_http_decode_extension(bytes, length, extension, sizeof(extension))) {
+    if (!tainted_extensions ||
+        !sn_http_decode_extension(bytes, length, extension, sizeof(extension))) {
         return true;
     }
     while (extension_length < sizeof(extension) && extension[extension_length] != '\0') {
@@ -267,7 +269,8 @@ static bool append_custom_metadata(const uint8_t *bytes,
 bool sn_decode_http(const uint8_t *bytes,
                     size_t length,
                     char *output,
-                    size_t output_capacity)
+                    size_t output_capacity,
+                    bool tainted_extensions)
 {
     size_t first_line_end;
     size_t first_space = 0U;
@@ -341,13 +344,15 @@ bool sn_decode_http(const uint8_t *bytes,
                                         output_capacity - strlen(output),
                                         " bytes=%s", content_length);
         } else {
-            return append_custom_metadata(bytes, length, output, output_capacity);
+            return append_custom_metadata(bytes, length, output, output_capacity,
+                                          tainted_extensions);
         }
         if (!sn_decode_result_fits(formatted_length, output_capacity - base_length)) {
             output[0] = '\0';
             return false;
         }
-        return append_custom_metadata(bytes, length, output, output_capacity);
+        return append_custom_metadata(bytes, length, output, output_capacity,
+                          tainted_extensions);
     }
 
     while (first_space < first_line_end && bytes[first_space] != ' ') {
@@ -390,5 +395,6 @@ bool sn_decode_http(const uint8_t *bytes,
                                     bytes + second_space + 1U);
     }
     return output_fits(formatted_length, output, output_capacity) &&
-           append_custom_metadata(bytes, length, output, output_capacity);
+           append_custom_metadata(bytes, length, output, output_capacity,
+                                  tainted_extensions);
 }

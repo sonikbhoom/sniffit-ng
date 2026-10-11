@@ -52,10 +52,12 @@ static enum sn_flow_update_result make_flow_key(
     if (packet->protocol != 6U && packet->protocol != 17U &&
         packet->protocol != 1U && packet->protocol != 2U &&
         packet->protocol != 112U) {
-        return SN_FLOW_IGNORED;
-    }
-    if (!packet->transport_header_present || packet->transport == NULL ||
-        packet->transport_length < 4U) {
+        if (packet->ipv4_packet == NULL ||
+            packet->ipv4_packet_length != packet->ipv4_total_length) {
+            return SN_FLOW_IGNORED;
+        }
+    } else if (!packet->transport_header_present || packet->transport == NULL ||
+               packet->transport_length < 4U) {
         return SN_FLOW_INVALID;
     }
 
@@ -113,6 +115,23 @@ void sn_flow_table_set_payload_inspection(struct sn_flow_table *table, bool enab
             memset(flow->icmp_history, 0, sizeof(flow->icmp_history));
             flow->icmp_history_count = 0U;
             flow->icmp_history_next = 0U;
+        }
+    }
+}
+
+void sn_flow_table_set_decode_options(struct sn_flow_table *table,
+                                     bool show_raw_flows,
+                                     bool tainted_extensions,
+                                     const enum sn_decoder_mode modes[
+                                         SN_DECODER_MODULE_COUNT])
+{
+    if (table != NULL) {
+        table->show_raw_flows = show_raw_flows;
+        table->tainted_extensions = tainted_extensions;
+        if (modes != NULL) {
+            memcpy(table->decoder_modes, modes, sizeof(table->decoder_modes));
+        } else {
+            memset(table->decoder_modes, 0, sizeof(table->decoder_modes));
         }
     }
 }
@@ -185,7 +204,10 @@ enum sn_flow_update_result sn_flow_table_update(
     {
         char decoded[SN_PACKET_DECODE_TEXT_CAPACITY];
 
-        if (sn_protocol_decode(packet, decoded, sizeof(decoded))) {
+        if (sn_protocol_decode_with_modes(packet, decoded, sizeof(decoded),
+                          table->show_raw_flows,
+                          table->tainted_extensions,
+                          table->decoder_modes)) {
             struct sn_packet_decode_record *record =
                 &slot->decode_history[slot->decode_history_next];
             (void)snprintf(record->text, sizeof(record->text), "%s", decoded);

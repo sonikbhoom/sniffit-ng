@@ -16,9 +16,14 @@ option(SNIFFIT_NG_ENABLE_SANITIZERS "Build with AddressSanitizer and UBSan" OFF)
 option(SNIFFIT_NG_BUILD_PACKET_FUZZER "Build the Clang/libFuzzer Ethernet/SLL packet parser target" OFF)
 set(SNIFFIT_NG_CUSTOM_HTTP_DECODER_SOURCE "" CACHE FILEPATH
     "Optional user-supplied HTTP metadata extension source (disabled by default)")
+set(SNIFFIT_NG_CUSTOM_PROTOCOL_DECODER_SOURCE "" CACHE FILEPATH
+    "Optional user-supplied protocol decoder extension source (disabled by default)")
 
 add_library(sniffit_packet STATIC src/packet.c)
 target_include_directories(sniffit_packet PUBLIC include)
+
+add_library(sniffit_decoder_modes STATIC src/decoder_modes.c)
+target_include_directories(sniffit_decoder_modes PUBLIC include)
 
 if(SNIFFIT_NG_BUILD_PACKET_FUZZER)
     if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
@@ -80,8 +85,13 @@ if(SNIFFIT_NG_CUSTOM_HTTP_DECODER_SOURCE)
 else()
     target_sources(sniffit_decode PRIVATE src/decode_http_extension_default.c)
 endif()
+if(SNIFFIT_NG_CUSTOM_PROTOCOL_DECODER_SOURCE)
+    target_sources(sniffit_decode PRIVATE "${SNIFFIT_NG_CUSTOM_PROTOCOL_DECODER_SOURCE}")
+else()
+    target_sources(sniffit_decode PRIVATE src/decode_protocol_extension_default.c)
+endif()
 target_include_directories(sniffit_decode PUBLIC include PRIVATE src)
-target_link_libraries(sniffit_decode PUBLIC sniffit_packet)
+target_link_libraries(sniffit_decode PUBLIC sniffit_packet sniffit_decoder_modes)
 
 add_library(sniffit_flow STATIC src/flow.c)
 target_include_directories(sniffit_flow PUBLIC include)
@@ -116,6 +126,7 @@ target_link_libraries(sniffit_network_info PUBLIC PkgConfig::CURL)
 
 add_library(sniffit_config STATIC src/config.c)
 target_include_directories(sniffit_config PUBLIC include)
+target_link_libraries(sniffit_config PUBLIC sniffit_decoder_modes)
 
 add_library(sniffit_ui STATIC src/ui.c)
 target_include_directories(sniffit_ui PUBLIC include)
@@ -140,6 +151,9 @@ install(FILES sniffit-ng.conf.example
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(sniffit_packet PRIVATE
+        -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+    )
+    target_compile_options(sniffit_decoder_modes PRIVATE
         -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
     )
     target_compile_options(sniffit_flow PRIVATE
@@ -353,7 +367,7 @@ if(BUILD_TESTING AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND SNIFFIT_NG_ENABLE_SANITIZERS)
-    foreach(target sniffit_packet sniffit_decode sniffit_flow sniffit_capture sniffit_pcap_writer sniffit_monitor sniffit_payload_log sniffit_privilege sniffit_network_info sniffit_config sniffit_ui sniffit-ng test_ui_window test_ui_pty test_config test_network_info test_icmp_payload_view test_pcap_writer)
+    foreach(target sniffit_packet sniffit_decoder_modes sniffit_decode sniffit_flow sniffit_capture sniffit_pcap_writer sniffit_monitor sniffit_payload_log sniffit_privilege sniffit_network_info sniffit_config sniffit_ui sniffit-ng test_ui_window test_ui_pty test_config test_network_info test_icmp_payload_view test_pcap_writer)
         target_compile_options(${target} PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
         target_link_options(${target} PUBLIC -fsanitize=address,undefined)
     endforeach()

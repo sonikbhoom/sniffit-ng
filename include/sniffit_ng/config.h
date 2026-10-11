@@ -1,6 +1,8 @@
 #ifndef SNIFFIT_NG_CONFIG_H
 #define SNIFFIT_NG_CONFIG_H
 
+#include "sniffit_ng/decoder_modes.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -11,6 +13,9 @@ struct sn_app_config {
     bool inspect_payloads;
     bool payload_display_acknowledged;
     bool resolve_external_addr;
+    bool show_raw_flows;
+    bool tainted_extensions;
+    enum sn_decoder_mode decoder_modes[SN_DECODER_MODULE_COUNT];
 };
 
 void sn_config_init(struct sn_app_config *config);

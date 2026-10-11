@@ -68,6 +68,8 @@ static void test_valid_tcp_and_checksum(void)
     assert(view.transport_header_present);
     assert(view.protocol == 6U);
     assert(view.ipv4_checksum_valid);
+    assert(view.ipv4_packet == frame + ETHERNET_HEADER_LENGTH);
+    assert(view.ipv4_packet_length == IPV4_HEADER_LENGTH + 23U);
     assert(view.payload_length == 3U);
     assert(memcmp(view.payload, "abc", 3U) == 0);
     assert(view.source_ipv4[0] == 192U && view.destination_ipv4[0] == 198U);
@@ -84,6 +86,8 @@ static void test_truncated_frames(void)
                                          &view) == SN_PACKET_TRUNCATED);
     assert(sn_packet_parse_ethernet_ipv4(frame, frame_length - 1U,
                                          &view) == SN_PACKET_TRUNCATED);
+    assert(view.ipv4_packet == NULL);
+    assert(view.ipv4_packet_length == 0U);
 }
 
 static void test_malformed_ipv4_headers(void)
