@@ -100,6 +100,7 @@ This is the canonical list of open project work. Add newly agreed TODOs here und
 | [ ] | Manually verify the opt-in external-address lookup and its failure path on an authorized live interface. Keep this a manual check; tests must not contact third-party services. |
 | [ ] | Run multi-day soak tests for memory, CPU use, idle-flow expiry, and counter stability before claiming long-running readiness. |
 | [ ] | Expand corpus-backed fuzzing, malformed-pcap coverage, and privilege/capability tests across supported Linux environments. |
+| [ ] | Add opt-in scanner tracking: `track_scanners = true` logs non-local IPv4 sources observed initiating TCP connections to local port 22 or 23. When tracking is enabled, `investigate_scanners = true` additionally performs bounded, rate-limited, cached WHOIS/geolocation lookups via a documented provider such as ipwhois.io. Define what counts as an attempt, log retention, third-party disclosure, lookup limits/failure behavior, and fixture-only tests; never make automated tests contact the provider. |
 | [ ] | Define and implement a small, explicitly mapped legacy CLI/config compatibility subset; preserve only validated, safe behavior. |
 | [ ] | Add selected summary/dump output modes. Keep payload output disabled unless its existing authorization and privacy gates are satisfied. |
 | [ ] | Add CPack generation/content checks to CI and verify install/remove on disposable Debian and RPM systems. RPM transaction testing and native Debian validation remain outstanding. |
