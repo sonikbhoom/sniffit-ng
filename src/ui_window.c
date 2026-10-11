@@ -73,29 +73,56 @@ void sn_ui_sort_flows(const struct sn_flow **flows, size_t flow_count)
     }
 }
 
-bool sn_ui_flow_is_ssh_telnet(const struct sn_flow *flow)
+bool sn_ui_flow_is_priority(const struct sn_flow *flow,
+                            const struct sn_ui_priority_port *priority_ports,
+                            size_t priority_count)
 {
-    return flow != NULL && flow->protocol == 6U &&
-           (flow->endpoints[0].port == 22U || flow->endpoints[0].port == 23U ||
-            flow->endpoints[1].port == 22U || flow->endpoints[1].port == 23U);
+    if (flow == NULL || priority_ports == NULL) {
+        return false;
+    }
+    for (size_t priority_index = 0U; priority_index < priority_count;
+         ++priority_index) {
+        if (flow->protocol == priority_ports[priority_index].protocol &&
+            (flow->endpoints[0].port == priority_ports[priority_index].port ||
+             flow->endpoints[1].port == priority_ports[priority_index].port)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static uint64_t flow_total_bytes(const struct sn_flow *flow)
+{
+    if (UINT64_MAX - flow->bytes[0] < flow->bytes[1]) {
+        return UINT64_MAX;
+    }
+    return flow->bytes[0] + flow->bytes[1];
 }
 
 void sn_ui_sort_flows_by_priority(const struct sn_flow **flows,
-                                  size_t flow_count)
+                                  size_t flow_count,
+                                  const struct sn_ui_priority_port *priority_ports,
+                                  size_t priority_count)
 {
     if (flows == NULL || flow_count < 2U) {
         return;
     }
     for (size_t index = 1U; index < flow_count; ++index) {
         const struct sn_flow *current = flows[index];
-        bool current_priority = sn_ui_flow_is_ssh_telnet(current);
+        bool current_priority = sn_ui_flow_is_priority(
+            current, priority_ports, priority_count);
         size_t insertion = index;
 
         while (insertion > 0U) {
             const struct sn_flow *previous = flows[insertion - 1U];
-            bool previous_priority = sn_ui_flow_is_ssh_telnet(previous);
+            bool previous_priority = sn_ui_flow_is_priority(
+                previous, priority_ports, priority_count);
+            uint64_t current_bytes = flow_total_bytes(current);
+            uint64_t previous_bytes = flow_total_bytes(previous);
             bool precedes = current_priority != previous_priority ?
-                current_priority : compare_flows(current, previous) < 0;
+                current_priority : current_bytes != previous_bytes ?
+                    current_bytes > previous_bytes :
+                    compare_flows(current, previous) < 0;
 
             if (!precedes) {
                 break;

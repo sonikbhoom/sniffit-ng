@@ -201,6 +201,14 @@ enum sn_flow_update_result sn_flow_table_update(
     increment_saturated(&slot->packets[key.direction], 1U);
     increment_saturated(&slot->bytes[key.direction], packet->ipv4_total_length);
     slot->last_seen_ns = timestamp_ns;
+    if (slot->security_advisory[0] == '\0') {
+        const char *advisory = sn_protocol_security_advisory(packet);
+
+        if (advisory[0] != '\0') {
+            (void)snprintf(slot->security_advisory,
+                           sizeof(slot->security_advisory), "%s", advisory);
+        }
+    }
     {
         char decoded[SN_PACKET_DECODE_TEXT_CAPACITY];
 

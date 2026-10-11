@@ -132,14 +132,16 @@ static void test_protocol_mode_selects_extension_or_simplified_decoder(void)
     assert(protocol_extension_calls == 0U);
     assert(strstr(output, "IPv4 protocol=17") != NULL);
     assert(strstr(output, "researcher.summary") == NULL);
-    assert(strstr(output, "SECURITY: WEAK; DNS on port 53") != NULL);
+    assert(strstr(output, "SECURITY:") == NULL);
+    assert(strcmp(sn_protocol_security_advisory(&packet),
+                  "SECURITY: WEAK; DNS on port 53 is usually cleartext") == 0);
 
     protocol_extension_calls = 0U;
     assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
                                          false, true, modes));
     assert(protocol_extension_calls == 1U);
     assert(strstr(output, "researcher.summary") != NULL);
-    assert(strstr(output, "SECURITY: WEAK; DNS on port 53") != NULL);
+    assert(strstr(output, "SECURITY:") == NULL);
 
     modes[SN_DECODER_DNS] = SN_DECODER_SIMPLIFIED;
     protocol_extension_calls = 0U;
@@ -168,7 +170,9 @@ static void test_protocol_mode_selects_extension_or_simplified_decoder(void)
     modes[SN_DECODER_TELNET] = SN_DECODER_SIMPLIFIED;
     assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
                                          false, false, modes));
-    assert(strstr(output, "SECURITY: WEAK; Telnet exposes credentials") != NULL);
+    assert(strstr(output, "SECURITY:") == NULL);
+    assert(strcmp(sn_protocol_security_advisory(&packet),
+                  "SECURITY: WEAK; Telnet exposes credentials and sessions, use SSH") == 0);
 
     modes[SN_DECODER_TELNET] = SN_DECODER_RAW;
     protocol_extension_calls = 0U;
@@ -176,7 +180,7 @@ static void test_protocol_mode_selects_extension_or_simplified_decoder(void)
                                          false, false, modes));
     assert(protocol_extension_calls == 0U);
     assert(strstr(output, "IPv4 protocol=6") != NULL);
-    assert(strstr(output, "SECURITY: WEAK; Telnet") != NULL);
+    assert(strstr(output, "SECURITY:") == NULL);
     assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
                                          false, true, modes));
     assert(protocol_extension_calls == 1U);
@@ -206,7 +210,9 @@ static void test_protocol_mode_selects_extension_or_simplified_decoder(void)
                                          false, false, modes));
     assert(protocol_extension_calls == 0U);
     assert(strstr(output, "IPv4 protocol=1") != NULL);
-    assert(strstr(output, "SECURITY: unencrypted and unauthenticated") != NULL);
+    assert(strstr(output, "SECURITY:") == NULL);
+    assert(strcmp(sn_protocol_security_advisory(&packet),
+                  "SECURITY: unencrypted and unauthenticated diagnostic traffic") == 0);
     assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
                                          false, true, modes));
     assert(protocol_extension_calls == 1U);
@@ -222,7 +228,9 @@ static void test_protocol_mode_selects_extension_or_simplified_decoder(void)
                                          false, false, modes));
     assert(protocol_extension_calls == 0U);
     assert(strstr(output, "IPv4 protocol=6") != NULL);
-    assert(strstr(output, "SECURITY: WEAK; legacy TCP service") != NULL);
+    assert(strstr(output, "SECURITY:") == NULL);
+    assert(strcmp(sn_protocol_security_advisory(&packet),
+                  "SECURITY: WEAK; legacy TCP service may expose credentials/data without TLS") == 0);
     assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
                                          false, true, modes));
     assert(protocol_extension_calls == 1U);
@@ -242,11 +250,13 @@ static void test_protocol_mode_selects_extension_or_simplified_decoder(void)
                                          false, false, modes));
     assert(protocol_extension_calls == 0U);
     assert(strstr(output, "IPv4 protocol=17") != NULL);
-    assert(strstr(output, "SNMPv1/v2c community strings are cleartext") != NULL);
+    assert(strstr(output, "SECURITY:") == NULL);
+    assert(strstr(sn_protocol_security_advisory(&packet),
+                  "SNMPv1/v2c community strings are cleartext") != NULL);
     assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
                                          false, true, modes));
     assert(protocol_extension_calls == 1U);
-    assert(strstr(output, "SNMPv1/v2c community strings are cleartext") != NULL);
+    assert(strstr(output, "SECURITY:") == NULL);
 
     snmp[4] = 3U;
     protocol_extension_calls = 0U;
@@ -263,11 +273,13 @@ static void test_protocol_mode_selects_extension_or_simplified_decoder(void)
     assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
                                          false, false, modes));
     assert(protocol_extension_calls == 0U);
-    assert(strstr(output, "RADIUS attributes are not encrypted") != NULL);
+    assert(strstr(output, "SECURITY:") == NULL);
+    assert(strstr(sn_protocol_security_advisory(&packet),
+                  "RADIUS attributes are not encrypted") != NULL);
     assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
                                          false, true, modes));
     assert(protocol_extension_calls == 1U);
-    assert(strstr(output, "RADIUS attributes are not encrypted") != NULL);
+    assert(strstr(output, "SECURITY:") == NULL);
 }
 
 static void test_tcp_and_udp_metadata(void)
@@ -437,7 +449,8 @@ static void test_dns_udp_tcp_and_compression_bounds(void)
     assert(sn_protocol_decode(&packet, output, sizeof(output)));
     assert(strstr(output, "DNS REQUEST id=0x1234 opcode=QUERY RD=1") != NULL);
     assert(strstr(output, "Question: www.example.com A/IN") != NULL);
-    assert(strstr(output, "SECURITY: WEAK; DNS on port 53") != NULL);
+    assert(strcmp(sn_protocol_security_advisory(&packet),
+                  "SECURITY: WEAK; DNS on port 53 is usually cleartext") == 0);
 
     memcpy(response, query, sizeof(query));
     response[2] = 0x81U;
@@ -477,7 +490,8 @@ static void test_dns_udp_tcp_and_compression_bounds(void)
     assert(strstr(output, "UDP 12345->53") != NULL);
     assert(strstr(output, "DNS REQUEST") == NULL);
     assert(strstr(output, "Question:") == NULL);
-    assert(strstr(output, "SECURITY: WEAK; DNS on port 53") != NULL);
+    assert(strcmp(sn_protocol_security_advisory(&packet),
+                  "SECURITY: WEAK; DNS on port 53 is usually cleartext") == 0);
 
     tcp[0] = 0x30U;
     tcp[1] = 0x39U;
@@ -557,7 +571,10 @@ static void test_dns_maximum_wire_name_is_bounded_in_output(void)
     packet.payload_length = sizeof(query);
     assert(sn_protocol_decode(&packet, output, sizeof(output)));
     assert(strstr(output, "DNS REQUEST id=0x5679") != NULL);
-    assert(strstr(output, "... | SECURITY: WEAK; DNS on port 53") != NULL);
+    assert(strstr(output, "...") != NULL);
+    assert(strstr(output, "SECURITY:") == NULL);
+    assert(strcmp(sn_protocol_security_advisory(&packet),
+                  "SECURITY: WEAK; DNS on port 53 is usually cleartext") == 0);
     assert(output[sizeof(output) - 1U] == '\0');
 }
 
@@ -813,7 +830,8 @@ static void test_ntp_metadata_and_validation(void)
     packet.payload_length = sizeof(ntp);
     assert(sn_protocol_decode(&packet, output, sizeof(output)));
     assert(strstr(output, "NTP SERVER RESPONSE v4") != NULL);
-    assert(strstr(output, "SECURITY: WEAK; NTP") != NULL);
+    assert(strcmp(sn_protocol_security_advisory(&packet),
+                  "SECURITY: WEAK; NTP is unauthenticated plaintext, use NTS") == 0);
     assert(strstr(output, "Status: leap=no-warning stratum=2 (secondary)") != NULL);
     assert(strstr(output, "Parameters: poll=6 precision=-20") != NULL);
     assert(strstr(output, "refid=47505300") != NULL);
@@ -832,7 +850,8 @@ static void test_ntp_metadata_and_validation(void)
     assert(sn_protocol_decode(&packet, output, sizeof(output)));
     assert(strstr(output, "UDP 123->40000") != NULL);
     assert(strstr(output, "NTP SERVER RESPONSE") == NULL);
-    assert(strstr(output, "SECURITY: WEAK; NTP") != NULL);
+    assert(strcmp(sn_protocol_security_advisory(&packet),
+                  "SECURITY: WEAK; NTP is unauthenticated plaintext, use NTS") == 0);
 
     packet.payload_length = sizeof(ntp);
     udp[5] = 56U;
@@ -841,7 +860,8 @@ static void test_ntp_metadata_and_validation(void)
     assert(sn_protocol_decode(&packet, output, sizeof(output)));
     assert(strstr(output, "UDP 123->40000") != NULL);
     assert(strstr(output, "NTP SERVER RESPONSE") == NULL);
-    assert(strstr(output, "SECURITY: WEAK; NTP") != NULL);
+    assert(strcmp(sn_protocol_security_advisory(&packet),
+                  "SECURITY: WEAK; NTP is unauthenticated plaintext, use NTS") == 0);
 
     char tiny_output[1] = {'x'};
     assert(!sn_decode_ntp(ntp, sizeof(ntp), tiny_output, sizeof(tiny_output)));
@@ -936,7 +956,9 @@ static void test_igmp_vrrp_and_icmp(void)
     packet.icmp_sequence = 7U;
     assert(sn_protocol_decode(&packet, output, sizeof(output)));
     assert(strstr(output, "ICMP Echo request") != NULL);
-    assert(strstr(output, "SECURITY: unencrypted and unauthenticated") != NULL);
+    assert(strstr(output, "SECURITY:") == NULL);
+    assert(strcmp(sn_protocol_security_advisory(&packet),
+                  "SECURITY: unencrypted and unauthenticated diagnostic traffic") == 0);
 }
 
 static void test_invalid_decoder_arguments(void)

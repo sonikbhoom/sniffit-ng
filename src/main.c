@@ -160,6 +160,8 @@ static int replay_pcap(const char *path,
                        bool tainted_extensions,
                        const enum sn_decoder_mode decoder_modes[
                            SN_DECODER_MODULE_COUNT],
+                       const struct sn_ui_priority_port *priority_ports,
+                       size_t priority_count,
                        const char *payload_log_path,
                        const char *pcap_output_path)
 {
@@ -246,6 +248,7 @@ static int replay_pcap(const char *path,
     return sn_ui_run(&monitor, NULL,
                      payload_logging_enabled || pcap_recording_enabled,
                      payload_inspection_enabled,
+                     priority_ports, priority_count,
                      NULL, NULL);
 }
 
@@ -257,6 +260,8 @@ static int run_live_capture(const char *device,
                             bool tainted_extensions,
                             const enum sn_decoder_mode decoder_modes[
                                 SN_DECODER_MODULE_COUNT],
+                            const struct sn_ui_priority_port *priority_ports,
+                            size_t priority_count,
                             bool resolve_external_addr,
                             const char *payload_log_path,
                             const char *pcap_output_path)
@@ -340,6 +345,7 @@ static int run_live_capture(const char *device,
     ui_result = sn_ui_run(&monitor, &network_info,
                           payload_logging_enabled || pcap_writer != NULL,
                           payload_inspection_enabled,
+                          priority_ports, priority_count,
                           poll_live_capture, &live);
 
     sn_capture_close(capture);
@@ -444,6 +450,7 @@ int main(int argc, char **argv)
                            pcap_output_path != NULL,
                            payload_inspection_enabled, config.show_raw_flows,
                            config.tainted_extensions, config.decoder_modes,
+                           config.ui_priority_ports, config.ui_priority_count,
                            payload_log_path,
                            pcap_output_path);
     }
@@ -451,6 +458,7 @@ int main(int argc, char **argv)
                             payload_logging_enabled, payload_inspection_enabled,
                             config.show_raw_flows, config.tainted_extensions,
                             config.decoder_modes,
+                            config.ui_priority_ports, config.ui_priority_count,
                             config.resolve_external_addr,
                             payload_log_path, pcap_output_path);
 }

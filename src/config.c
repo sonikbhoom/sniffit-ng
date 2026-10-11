@@ -32,10 +32,91 @@ static char *trim(char *text)
     return text;
 }
 
+static bool parse_port_number(const char *text, uint16_t *port)
+{
+    unsigned int value = 0U;
+
+    if (text == NULL || text[0] == '\0' || port == NULL) {
+        return false;
+    }
+    for (const char *digit = text; *digit != '\0'; ++digit) {
+        if (!isdigit((unsigned char)*digit)) {
+            return false;
+        }
+        value = value * 10U + (unsigned int)(*digit - '0');
+        if (value > UINT16_MAX) {
+            return false;
+        }
+    }
+    if (value == 0U) {
+        return false;
+    }
+    *port = (uint16_t)value;
+    return true;
+}
+
+static bool parse_ui_priority(char *value, struct sn_app_config *config)
+{
+    char *entry = value;
+
+    config->ui_priority_count = 0U;
+    if (entry[0] == '\0') {
+        return true;
+    }
+    for (;;) {
+        char *comma = strchr(entry, ',');
+        char *token;
+        char *separator;
+        struct sn_ui_priority_port priority = {0};
+
+        if (comma != NULL) {
+            *comma = '\0';
+        }
+        token = trim(entry);
+        separator = strchr(token, '/');
+        if (separator == NULL || strchr(separator + 1, '/') != NULL) {
+            return false;
+        }
+        *separator = '\0';
+        if (!parse_port_number(trim(token), &priority.port)) {
+            return false;
+        }
+        {
+            char *protocol = trim(separator + 1);
+            if (strcmp(protocol, "tcp") == 0) {
+                priority.protocol = 6U;
+            } else if (strcmp(protocol, "udp") == 0) {
+                priority.protocol = 17U;
+            } else {
+                return false;
+            }
+        }
+        if (config->ui_priority_count >= SN_CONFIG_UI_PRIORITY_CAPACITY) {
+            return false;
+        }
+        for (size_t index = 0U; index < config->ui_priority_count; ++index) {
+            if (config->ui_priority_ports[index].protocol == priority.protocol &&
+                config->ui_priority_ports[index].port == priority.port) {
+                return false;
+            }
+        }
+        config->ui_priority_ports[config->ui_priority_count++] = priority;
+        if (comma == NULL) {
+            return true;
+        }
+        entry = comma + 1;
+    }
+}
+
 void sn_config_init(struct sn_app_config *config)
 {
     if (config != NULL) {
         *config = (struct sn_app_config){0};
+        config->ui_priority_ports[0] =
+            (struct sn_ui_priority_port){.protocol = 6U, .port = 22U};
+        config->ui_priority_ports[1] =
+            (struct sn_ui_priority_port){.protocol = 6U, .port = 23U};
+        config->ui_priority_count = 2U;
     }
 }
 
@@ -71,6 +152,7 @@ bool sn_config_load_file(const char *path,
     bool external_address_setting_seen = false;
     bool raw_flows_setting_seen = false;
     bool tainted_extensions_setting_seen = false;
+    bool ui_priority_setting_seen = false;
     bool decoder_setting_seen[SN_DECODER_MODULE_COUNT] = {false};
 
     if (path == NULL || path[0] == '\0' || config == NULL) {
@@ -165,6 +247,16 @@ bool sn_config_load_file(const char *path,
                     fclose(stream);
                     set_error(error_buffer, error_buffer_size,
                               "tainted_extensions must be true or false", line_number);
+                    return false;
+                }
+            } else if (strcmp(key, "ui_priority") == 0 &&
+                       !ui_priority_setting_seen) {
+                ui_priority_setting_seen = true;
+                if (!parse_ui_priority(value, config)) {
+                    fclose(stream);
+                    set_error(error_buffer, error_buffer_size,
+                              "ui_priority must contain unique PORT/tcp or PORT/udp entries",
+                              line_number);
                     return false;
                 }
             } else {

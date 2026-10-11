@@ -37,4 +37,6 @@ bool sn_protocol_decode_with_modes(
     bool tainted_extensions,
     const enum sn_decoder_mode modes[SN_DECODER_MODULE_COUNT]);
 
+const char *sn_protocol_security_advisory(const struct sn_packet_view *packet);
+
 #endif

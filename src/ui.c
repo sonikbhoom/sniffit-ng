@@ -16,6 +16,8 @@ struct ui_detail_context {
     struct sn_monitor *monitor;
     const struct sn_network_info *network_info;
     const struct sn_ui_flow_filter *filter;
+    const struct sn_ui_priority_port *priority_ports;
+    size_t priority_count;
     const struct sn_flow **flows;
     size_t flow_count;
     size_t *selected;
@@ -56,7 +58,9 @@ static bool initialize_ui_colors(void)
 
 static size_t collect_flows(struct sn_monitor *monitor,
                             const struct sn_ui_flow_filter *filter,
-                            const struct sn_flow **flows)
+                            const struct sn_flow **flows,
+                            const struct sn_ui_priority_port *priority_ports,
+                            size_t priority_count)
 {
     size_t count = 0U;
 
@@ -66,7 +70,7 @@ static size_t collect_flows(struct sn_monitor *monitor,
             flows[count++] = flow;
         }
     }
-    sn_ui_sort_flows_by_priority(flows, count);
+    sn_ui_sort_flows_by_priority(flows, count, priority_ports, priority_count);
     return count;
 }
 
@@ -162,6 +166,8 @@ static void draw_screen(struct sn_monitor *monitor,
                         const struct sn_network_info *network_info,
                         const struct sn_ui_flow_filter *filter,
                         const struct sn_flow **flows,
+                        const struct sn_ui_priority_port *priority_ports,
+                        size_t priority_count,
                         size_t flow_count,
                         size_t selected,
                         size_t scroll_start,
@@ -238,7 +244,8 @@ static void draw_screen(struct sn_monitor *monitor,
         char endpoint_b[INET_ADDRSTRLEN] = "?";
         size_t flow_index = scroll_start + row;
         const struct sn_flow *flow = flows[flow_index];
-        bool priority_flow = sn_ui_flow_is_ssh_telnet(flow);
+        bool priority_flow = sn_ui_flow_is_priority(
+            flow, priority_ports, priority_count);
         bool endpoint_a_is_local = have_local_ipv4 &&
             memcmp(flow->endpoints[0].ipv4, local_ipv4, sizeof(local_ipv4)) == 0;
         bool endpoint_b_is_local = have_local_ipv4 &&
@@ -246,9 +253,10 @@ static void draw_screen(struct sn_monitor *monitor,
         bool selected_flow = flow_index == selected;
         bool apply_flow_colors = colors_enabled && !selected_flow;
         attr_t row_attributes = selected_flow ? A_REVERSE : A_NORMAL;
+        attr_t priority_attributes = colors_enabled && priority_flow ?
+            COLOR_PAIR(UI_COLOR_SSH_TELNET) : 0;
         attr_t session_attributes = row_attributes |
-            (apply_flow_colors && priority_flow ?
-             COLOR_PAIR(UI_COLOR_SSH_TELNET) : 0);
+            priority_attributes;
 
         (void)inet_ntop(AF_INET, flow->endpoints[0].ipv4,
                         endpoint_a, sizeof(endpoint_a));
@@ -256,17 +264,15 @@ static void draw_screen(struct sn_monitor *monitor,
                         endpoint_b, sizeof(endpoint_b));
         attrset(session_attributes);
         mvprintw((int)row + 3, 0, "%-5s ", protocol_name(flow->protocol));
-        attrset(row_attributes | (apply_flow_colors && endpoint_a_is_local ?
-                 COLOR_PAIR(UI_COLOR_LOCAL_ADDRESS) :
-             (apply_flow_colors && priority_flow ?
-                  COLOR_PAIR(UI_COLOR_SSH_TELNET) : 0)));
+        attrset(row_attributes | (priority_flow ? priority_attributes :
+                 (apply_flow_colors && endpoint_a_is_local ?
+                  COLOR_PAIR(UI_COLOR_LOCAL_ADDRESS) : 0)));
         printw("%-15s", endpoint_a);
         attrset(session_attributes);
         printw(":%-5u -> ", flow->endpoints[0].port);
-        attrset(row_attributes | (apply_flow_colors && endpoint_b_is_local ?
-                 COLOR_PAIR(UI_COLOR_LOCAL_ADDRESS) :
-             (apply_flow_colors && priority_flow ?
-                  COLOR_PAIR(UI_COLOR_SSH_TELNET) : 0)));
+        attrset(row_attributes | (priority_flow ? priority_attributes :
+                 (apply_flow_colors && endpoint_b_is_local ?
+                  COLOR_PAIR(UI_COLOR_LOCAL_ADDRESS) : 0)));
         printw("%-15s", endpoint_b);
         attrset(session_attributes);
         printw(":%-5u %8llu/%-8llu",
@@ -488,13 +494,51 @@ static void append_decode_record(WINDOW *history,
 
 static void refresh_detail_panel(WINDOW *panel, WINDOW *history, int panel_x)
 {
-    int history_height = LINES - 11;
+    int history_height = LINES - 13;
     int latest_line = getcury(history);
     int top_line = latest_line >= history_height ?
         latest_line - history_height + 1 : 0;
 
     (void)wnoutrefresh(panel);
-    (void)prefresh(history, top_line, 0, 8, panel_x + 2, LINES - 4, COLS - 3);
+    (void)prefresh(history, top_line, 0, 10, panel_x + 2, LINES - 4, COLS - 3);
+}
+
+static void draw_security_advisory(WINDOW *panel, const struct sn_flow *flow)
+{
+    int available_width = getmaxx(panel) - 4;
+    const char *remaining = flow->security_advisory;
+
+    for (int row = 7; row < 10; ++row) {
+        (void)mvwhline(panel, row, 2, ' ', available_width);
+    }
+    if (remaining[0] == '\0' || available_width <= 0) {
+        return;
+    }
+    for (int row = 7; row < 10 && remaining[0] != '\0'; ++row) {
+        size_t remaining_length = strlen(remaining);
+        size_t line_length = remaining_length < (size_t)available_width ?
+            remaining_length : (size_t)available_width;
+
+        if (line_length < remaining_length) {
+            size_t split = line_length;
+
+            while (split > 0U && remaining[split - 1U] != ' ') {
+                --split;
+            }
+            if (split > 0U) {
+                line_length = split - 1U;
+            }
+        }
+        if (line_length == 0U) {
+            line_length = remaining_length < (size_t)available_width ?
+                remaining_length : (size_t)available_width;
+        }
+        (void)mvwaddnstr(panel, row, 2, remaining, (int)line_length);
+        remaining += line_length;
+        while (*remaining == ' ') {
+            ++remaining;
+        }
+    }
 }
 
 static void append_matching_events(struct sn_monitor *monitor,
@@ -523,6 +567,7 @@ static void append_matching_events(struct sn_monitor *monitor,
         (void)mvwprintw(panel, 6, 2, "Bytes A>B/B>A: %llu/%llu",
                         (unsigned long long)updated->bytes[0],
                         (unsigned long long)updated->bytes[1]);
+        draw_security_advisory(panel, updated);
 
         if (updated->decode_history_count > 0U &&
             (updated->decode_history_count != *seen_decode_count ||
@@ -599,6 +644,7 @@ static void draw_detail_contents(struct ui_detail_context *context,
     (void)mvwprintw(panel, 6, 2, "Bytes A>B/B>A: %llu/%llu",
                     (unsigned long long)flow->bytes[0],
                     (unsigned long long)flow->bytes[1]);
+    draw_security_advisory(panel, flow);
     (void)mvwprintw(panel, LINES - 2, 2, "Traffic: %s", protocol_name(flow->protocol));
 
     if (!load_history) {
@@ -638,7 +684,8 @@ static void redraw_detail_background(struct ui_detail_context *context,
         (size_t)(LINES - (context->show_stats ? 14 : 5)) : 1U;
 
     context->flow_count = collect_flows(context->monitor, context->filter,
-                                        context->flows);
+                                        context->flows, context->priority_ports,
+                                        context->priority_count);
     if (context->flow_count == 0U) {
         return;
     }
@@ -662,6 +709,7 @@ static void redraw_detail_background(struct ui_detail_context *context,
 static void draw_detail_background(struct ui_detail_context *context)
 {
     draw_screen(context->monitor, context->network_info, context->filter, context->flows,
+                context->priority_ports, context->priority_count,
                 context->flow_count, *context->selected, *context->scroll_start,
                 context->show_stats, context->recording_active,
                 context->payload_inspection_active, *context->capture_status,
@@ -795,6 +843,8 @@ int sn_ui_run(struct sn_monitor *monitor,
           const struct sn_network_info *network_info,
               bool recording_active,
               bool payload_inspection_active,
+              const struct sn_ui_priority_port *priority_ports,
+              size_t priority_count,
               sn_ui_poll_callback poll_capture,
               void *poll_context)
 {
@@ -823,7 +873,8 @@ int sn_ui_run(struct sn_monitor *monitor,
     sn_monitor_rate_sampler_init(&rate_sampler);
 
     for (;;) {
-        size_t flow_count = collect_flows(monitor, &filter, flows);
+        size_t flow_count = collect_flows(monitor, &filter, flows,
+                          priority_ports, priority_count);
 
         if (capture_polling) {
             if (sn_monitor_rate_sample(&rate_sampler, &monitor->stats,
@@ -835,7 +886,8 @@ int sn_ui_run(struct sn_monitor *monitor,
             }
             discard_monitor_events(monitor);
         }
-        flow_count = collect_flows(monitor, &filter, flows);
+        flow_count = collect_flows(monitor, &filter, flows,
+                       priority_ports, priority_count);
         if (selected >= flow_count && flow_count > 0U) {
             selected = flow_count - 1U;
         }
@@ -847,6 +899,8 @@ int sn_ui_run(struct sn_monitor *monitor,
             .monitor = monitor,
             .network_info = network_info,
             .filter = &filter,
+            .priority_ports = priority_ports,
+            .priority_count = priority_count,
             .flows = flows,
             .flow_count = flow_count,
             .selected = &selected,
@@ -859,7 +913,8 @@ int sn_ui_run(struct sn_monitor *monitor,
             .capture_status = &capture_status,
             .rates = rates_ready ? &rates : (capture_polling ? &rates : NULL)
         };
-        draw_screen(monitor, network_info, &filter, flows, flow_count, selected, scroll_start,
+        draw_screen(monitor, network_info, &filter, flows,
+            priority_ports, priority_count, flow_count, selected, scroll_start,
                 show_stats, recording_active, payload_inspection_active,
             capture_status, detail_context.rates, colors_enabled);
         key = getch();

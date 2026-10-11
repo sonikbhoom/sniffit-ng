@@ -20,6 +20,8 @@ int sn_ui_run(struct sn_monitor *monitor,
 		const struct sn_network_info *network_info,
 		bool recording_active,
 		bool payload_inspection_active,
+		const struct sn_ui_priority_port *priority_ports,
+		size_t priority_count,
 		sn_ui_poll_callback poll_capture,
 		void *poll_context);
 

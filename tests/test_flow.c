@@ -177,6 +177,10 @@ static void test_icmp_payload_requires_opt_in_and_is_bounded(void)
     sn_flow_table_init(&table, 100U);
     assert(sn_flow_table_update(&table, &packet, 1U, &flow) == SN_FLOW_CREATED);
     assert(flow != NULL && flow->icmp_history_count == 0U);
+    assert(strcmp(flow->security_advisory,
+                  "SECURITY: unencrypted and unauthenticated diagnostic traffic") == 0);
+    assert(flow->decode_history_count == 1U);
+    assert(strstr(flow->decode_history[0].text, "SECURITY:") == NULL);
 
     sn_flow_table_set_payload_inspection(&table, true);
     assert(sn_flow_table_update(&table, &packet, 2U, &flow) == SN_FLOW_UPDATED);

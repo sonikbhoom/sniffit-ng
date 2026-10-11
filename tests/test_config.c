@@ -58,10 +58,68 @@ static void test_payload_inspection_defaults_off(void)
     assert(!config.resolve_external_addr);
     assert(!config.show_raw_flows);
     assert(!config.tainted_extensions);
+    assert(config.ui_priority_count == 2U);
+    assert(config.ui_priority_ports[0].protocol == 6U);
+    assert(config.ui_priority_ports[0].port == 22U);
+    assert(config.ui_priority_ports[1].protocol == 6U);
+    assert(config.ui_priority_ports[1].port == 23U);
     for (size_t index = 0U; index < SN_DECODER_MODULE_COUNT; ++index) {
         assert(config.decoder_modes[index] == SN_DECODER_SIMPLIFIED);
     }
     assert(unlink(path) == 0);
+}
+
+static void test_ui_priority_ports_parse_tcp_and_udp(void)
+{
+    char path[80];
+    char error[256] = {0};
+    struct sn_app_config config;
+
+    write_config_file(path, "ui_priority = 22/tcp, 23/tcp, 53/udp\n");
+    assert(sn_config_load_file(path, &config, error, sizeof(error)));
+    assert(config.ui_priority_count == 3U);
+    assert(config.ui_priority_ports[0].protocol == 6U);
+    assert(config.ui_priority_ports[0].port == 22U);
+    assert(config.ui_priority_ports[1].protocol == 6U);
+    assert(config.ui_priority_ports[1].port == 23U);
+    assert(config.ui_priority_ports[2].protocol == 17U);
+    assert(config.ui_priority_ports[2].port == 53U);
+    assert(unlink(path) == 0);
+
+    write_config_file(path, "ui_priority =\n");
+    assert(sn_config_load_file(path, &config, error, sizeof(error)));
+    assert(config.ui_priority_count == 0U);
+    assert(unlink(path) == 0);
+}
+
+static void test_ui_priority_ports_reject_invalid_entries(void)
+{
+    static const char *invalid_values[] = {
+        "0/tcp", "65536/tcp", "22/sctp", "22/tcp,", "22/tcp,22/tcp", "/udp"
+    };
+
+    for (size_t index = 0U; index < sizeof(invalid_values) / sizeof(invalid_values[0]); ++index) {
+        char path[80];
+        char error[256] = {0};
+        char contents[128];
+        struct sn_app_config config;
+
+        assert(snprintf(contents, sizeof(contents), "ui_priority = %s\n",
+                        invalid_values[index]) > 0);
+        write_config_file(path, contents);
+        assert(!sn_config_load_file(path, &config, error, sizeof(error)));
+        assert(strstr(error, "ui_priority") != NULL);
+        assert(unlink(path) == 0);
+    }
+
+    {
+        char path[80];
+        char error[256] = {0};
+        struct sn_app_config config;
+        write_config_file(path, "ui_priority = 22/tcp\nui_priority = 53/udp\n");
+        assert(!sn_config_load_file(path, &config, error, sizeof(error)));
+        assert(unlink(path) == 0);
+    }
 }
 
 static void test_raw_flow_and_tainted_extension_options(void)
@@ -167,6 +225,8 @@ int main(void)
 {
     test_payload_inspection_requires_recorded_ack();
     test_payload_inspection_defaults_off();
+    test_ui_priority_ports_parse_tcp_and_udp();
+    test_ui_priority_ports_reject_invalid_entries();
     test_external_address_lookup_is_opt_in();
     test_unknown_duplicate_and_invalid_values_are_rejected();
     test_raw_flow_and_tainted_extension_options();

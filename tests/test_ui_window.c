@@ -114,13 +114,18 @@ static void test_flow_filter_direction_semantics(void)
     assert(!sn_ui_flow_matches(&flow, NULL));
 }
 
-static void test_ssh_telnet_flows_are_highlighted_and_sorted_first(void)
+static void test_configured_priority_flows_are_red_and_sorted_by_volume(void)
 {
     struct sn_flow ssh = {0};
     struct sn_flow ordinary = {0};
     struct sn_flow telnet = {0};
-    struct sn_flow udp_ssh_port = {0};
-    const struct sn_flow *flows[3];
+    struct sn_flow udp_dns = {0};
+    struct sn_ui_priority_port priority_ports[] = {
+        {.protocol = 6U, .port = 22U},
+        {.protocol = 6U, .port = 23U},
+        {.protocol = 17U, .port = 53U}
+    };
+    const struct sn_flow *flows[4];
 
     ssh.protocol = 6U;
     ssh.endpoints[0].ipv4[0] = 10U;
@@ -136,24 +141,31 @@ static void test_ssh_telnet_flows_are_highlighted_and_sorted_first(void)
     telnet = ssh;
     telnet.endpoints[1].port = 23U;
 
-    udp_ssh_port = ssh;
-    udp_ssh_port.protocol = 17U;
-    assert(sn_ui_flow_is_ssh_telnet(&ssh));
-    assert(sn_ui_flow_is_ssh_telnet(&telnet));
-    assert(!sn_ui_flow_is_ssh_telnet(&ordinary));
-    assert(!sn_ui_flow_is_ssh_telnet(&udp_ssh_port));
-
-    ssh.packets[1] = 3U;
-    assert(sn_ui_flow_is_ssh_telnet(&ssh));
-    ssh.packets[1] = 0U;
+    udp_dns = ssh;
+    udp_dns.protocol = 17U;
+    udp_dns.endpoints[1].port = 53U;
+    ssh.bytes[0] = 20U;
+    telnet.bytes[0] = 0U;
+    telnet.bytes[1] = 20U;
+    udp_dns.bytes[0] = 30U;
+    ordinary.bytes[0] = 100U;
+    assert(sn_ui_flow_is_priority(&ssh, priority_ports, 3U));
+    assert(sn_ui_flow_is_priority(&telnet, priority_ports, 3U));
+    assert(sn_ui_flow_is_priority(&udp_dns, priority_ports, 3U));
+    assert(!sn_ui_flow_is_priority(&ordinary, priority_ports, 3U));
 
     flows[0] = &ordinary;
     flows[1] = &telnet;
     flows[2] = &ssh;
-    sn_ui_sort_flows_by_priority(flows, 3U);
-    assert(flows[0] == &ssh);
-    assert(flows[1] == &telnet);
-    assert(flows[2] == &ordinary);
+    flows[3] = &udp_dns;
+    sn_ui_sort_flows_by_priority(flows, 4U, priority_ports, 3U);
+    assert(flows[0] == &udp_dns);
+    assert(flows[1] == &ssh);
+    assert(flows[2] == &telnet);
+    assert(flows[3] == &ordinary);
+
+    udp_dns.protocol = 6U;
+    assert(!sn_ui_flow_is_priority(&udp_dns, priority_ports, 3U));
 }
 
 static void test_detail_navigation_and_dismissal(void)
@@ -179,7 +191,7 @@ int main(void)
     test_flow_order_is_deterministic();
     test_service_hints_are_protocol_specific();
     test_flow_filter_direction_semantics();
-    test_ssh_telnet_flows_are_highlighted_and_sorted_first();
+    test_configured_priority_flows_are_red_and_sorted_by_volume();
     test_detail_navigation_and_dismissal();
     puts("ui window tests passed");
     return 0;

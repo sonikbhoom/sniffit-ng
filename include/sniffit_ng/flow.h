@@ -12,6 +12,7 @@
 #define SN_FLOW_DEFAULT_IDLE_TIMEOUT_NS 60000000000ULL
 #define SN_FLOW_ICMP_SAMPLE_CAPACITY 256U
 #define SN_FLOW_ICMP_HISTORY_CAPACITY 16U
+#define SN_FLOW_SECURITY_ADVISORY_CAPACITY 160U
 
 struct sn_flow_endpoint {
     uint8_t ipv4[4];
@@ -36,6 +37,7 @@ struct sn_flow {
     uint64_t packets[2];
     uint64_t bytes[2];
     uint64_t last_seen_ns;
+    char security_advisory[SN_FLOW_SECURITY_ADVISORY_CAPACITY];
     struct sn_icmp_echo_sample icmp_history[SN_FLOW_ICMP_HISTORY_CAPACITY];
     size_t icmp_history_count;
     size_t icmp_history_next;

@@ -10,6 +10,9 @@ resolve_external_addr = false
 # Show bounded IPv4 metadata when no built-in simple decoder exists.
 show_raw_flows = false
 
+# Priority matches are always red and sorted first, then by total observed bytes.
+ui_priority = 22/tcp,23/tcp
+
 # Enable statically linked researcher-supplied protocol extensions.
 # Compiled extension code is trusted executable code and is not sandboxed.
 tainted_extensions = false

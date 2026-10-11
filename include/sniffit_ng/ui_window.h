@@ -1,6 +1,7 @@
 #ifndef SNIFFIT_NG_UI_WINDOW_H
 #define SNIFFIT_NG_UI_WINDOW_H
 
+#include "sniffit_ng/config.h"
 #include "sniffit_ng/flow.h"
 
 #include <stdbool.h>
@@ -25,9 +26,13 @@ size_t sn_ui_window_start(size_t item_count,
                           size_t current_start);
 
 void sn_ui_sort_flows(const struct sn_flow **flows, size_t flow_count);
-bool sn_ui_flow_is_ssh_telnet(const struct sn_flow *flow);
+bool sn_ui_flow_is_priority(const struct sn_flow *flow,
+                    const struct sn_ui_priority_port *priority_ports,
+                    size_t priority_count);
 void sn_ui_sort_flows_by_priority(const struct sn_flow **flows,
-                                  size_t flow_count);
+                        size_t flow_count,
+                        const struct sn_ui_priority_port *priority_ports,
+                        size_t priority_count);
 const char *sn_ui_port_service_name(uint8_t protocol, uint16_t port);
 bool sn_ui_flow_matches(const struct sn_flow *flow,
                         const struct sn_ui_flow_filter *filter);

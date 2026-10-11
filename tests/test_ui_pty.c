@@ -33,6 +33,11 @@ static void seed_flows(struct sn_monitor *monitor)
     first->endpoints[1].ipv4[3] = 7U;
     first->endpoints[1].port = 22U;
     first->packets[0] = 1U;
+    (void)snprintf(first->security_advisory, sizeof(first->security_advisory),
+                   "SECURITY: unencrypted and unauthenticated diagnostic traffic");
+    first->decode_history_count = 1U;
+    (void)snprintf(first->decode_history[0].text,
+                   sizeof(first->decode_history[0].text), "ICMP Echo request");
 
     second->active = true;
     second->protocol = 17U;
@@ -150,7 +155,7 @@ int main(void)
     bool filters_cleared_by_reset;
 
     terminal_size.ws_row = 30U;
-    terminal_size.ws_col = 120U;
+    terminal_size.ws_col = 80U;
     assert(pipe(trigger_pipe) == 0);
     assert(fcntl(trigger_pipe[0], F_SETFL, O_NONBLOCK) == 0);
     child = forkpty(&master_fd, NULL, NULL, &terminal_size);
@@ -163,6 +168,11 @@ int main(void)
             .external_ipv4 = "203.0.113.7"
         };
         struct ui_poll_context poll_context;
+        const struct sn_ui_priority_port priority_ports[] = {
+            {.protocol = 6U, .port = 22U},
+            {.protocol = 6U, .port = 23U},
+            {.protocol = 17U, .port = 53U}
+        };
 
         (void)close(trigger_pipe[1]);
         (void)setenv("TERM", "xterm-256color", 1);
@@ -173,6 +183,7 @@ int main(void)
             .trigger_fd = trigger_pipe[0]
         };
         _exit(sn_ui_run(&monitor, &network_info, false, false,
+                priority_ports, sizeof(priority_ports) / sizeof(priority_ports[0]),
                 inject_new_flow, &poll_context));
     }
 
@@ -184,8 +195,8 @@ int main(void)
     assert(strstr(output, "external 203.0.113.7") != NULL);
     assert(read_until(master_fd, output, sizeof(output), &output_length,
                       "q quit", 1000));
-    assert(count_occurrences(output, "\033[38;5;65m") == 2U);
-    assert(strstr(output, "\033[38;5;131m") == NULL);
+    assert(count_occurrences(output, "\033[38;5;65m") == 1U);
+    assert(strstr(output, "\033[38;5;131m") != NULL);
     assert(strstr(output, "DIRECTION") == NULL);
     assert(strstr(output, "IN?") == NULL);
     assert(strstr(output, "t priority") == NULL);
@@ -219,6 +230,15 @@ int main(void)
     assert(write(master_fd, "\n", 1U) == 1);
     details_opened = read_until(master_fd, output, sizeof(output), &output_length,
                                 "TCP flow", 1000);
+        assert(read_until(master_fd, output, sizeof(output), &output_length,
+                 "SECURITY: unencrypted and", 1000));
+        assert(read_until(master_fd, output, sizeof(output), &output_length,
+                          "unauthenticated", 1000));
+        assert(read_until(master_fd, output, sizeof(output), &output_length,
+                          "diagnostic traffic", 1000));
+        assert(strstr(output, "Bytes A>B/B>A: 1/0") <
+            strstr(output, "SECURITY: unencrypted and"));
+        assert(strstr(output, "| SECURITY:") == NULL);
     if (details_opened) {
         assert(write(trigger_pipe[1], "x", 1U) == 1);
     }
@@ -227,7 +247,7 @@ int main(void)
     selected_counters_updated = read_until(master_fd, output, sizeof(output),
                                            &output_length,
                                            "Packets A>B/B>A: 2/0", 1000);
-    assert(write(master_fd, "\033OB", 3U) == 3);
+    assert(write(master_fd, "\033OB\033OB", 6U) == 6);
     details_followed_highlight =
         read_until(master_fd, output, sizeof(output), &output_length,
                    "A 10.0.0.1:1234", 1000);

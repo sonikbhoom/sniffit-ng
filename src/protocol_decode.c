@@ -148,77 +148,43 @@ static const char *security_note(const struct sn_packet_view *packet,
     }
     switch (module) {
     case SN_DECODER_ICMP:
-        return " | SECURITY: unencrypted and unauthenticated diagnostic traffic";
+        return "SECURITY: unencrypted and unauthenticated diagnostic traffic";
     case SN_DECODER_IGMP:
-        return " | SECURITY: unencrypted network-control traffic";
+        return "SECURITY: unencrypted network-control traffic";
     case SN_DECODER_HTTP:
-        return " | SECURITY: WEAK; HTTP is unencrypted, use HTTPS";
+        return "SECURITY: WEAK; HTTP is unencrypted, use HTTPS";
     case SN_DECODER_DNS:
-        return " | SECURITY: WEAK; DNS on port 53 is usually cleartext";
+        return "SECURITY: WEAK; DNS on port 53 is usually cleartext";
     case SN_DECODER_SYSLOG:
-        return " | SECURITY: syslog is unencrypted unless protected in transit";
+        return "SECURITY: syslog is unencrypted unless protected in transit";
     case SN_DECODER_DHCP4:
-        return " | SECURITY: DHCPv4 is unauthenticated local-network configuration";
+        return "SECURITY: DHCPv4 is unauthenticated local-network configuration";
     case SN_DECODER_NTP:
-        return " | SECURITY: WEAK; NTP is unauthenticated plaintext, use NTS";
+        return "SECURITY: WEAK; NTP is unauthenticated plaintext, use NTS";
     case SN_DECODER_SNMP:
         if (snmp_v1_or_v2c(packet)) {
-            return " | SECURITY: WEAK; SNMPv1/v2c community strings are cleartext, use SNMPv3 authPriv";
+            return "SECURITY: WEAK; SNMPv1/v2c community strings are cleartext, use SNMPv3 authPriv";
         }
         return "";
     case SN_DECODER_RADIUS:
-        return " | SECURITY: RADIUS attributes are not encrypted; protect the transport or use RadSec";
+        return "SECURITY: RADIUS attributes are not encrypted; protect the transport or use RadSec";
     case SN_DECODER_TELNET:
-        return " | SECURITY: WEAK; Telnet exposes credentials and sessions, use SSH";
+        return "SECURITY: WEAK; Telnet exposes credentials and sessions, use SSH";
     case SN_DECODER_TCP:
         if (is_legacy_cleartext_tcp_port(source_port) ||
             is_legacy_cleartext_tcp_port(destination_port)) {
-            return " | SECURITY: WEAK; legacy TCP service may expose credentials/data without TLS";
+            return "SECURITY: WEAK; legacy TCP service may expose credentials/data without TLS";
         }
         return "";
     case SN_DECODER_UDP:
         if (is_cleartext_udp_port(source_port) ||
             is_cleartext_udp_port(destination_port)) {
-            return " | SECURITY: unencrypted legacy UDP service; use a protected alternative where available";
+            return "SECURITY: unencrypted legacy UDP service; use a protected alternative where available";
         }
         return "";
     default:
         return "";
     }
-}
-
-static bool append_security_note(const struct sn_packet_view *packet,
-                                 enum sn_decoder_module module,
-                                 char *output,
-                                 size_t output_capacity)
-{
-    const char *note = security_note(packet, module);
-    size_t output_length = strlen(output);
-    size_t note_length = strlen(note);
-
-    if (note[0] == '\0') {
-        return true;
-    }
-    if (note_length + 1U >= output_capacity) {
-        output[0] = '\0';
-        return false;
-    }
-    if (output_length + note_length + 1U >= output_capacity) {
-        size_t retained_length;
-
-        if (output_capacity < note_length + 4U) {
-            output[0] = '\0';
-            return false;
-        }
-        retained_length = output_capacity - note_length - 4U;
-        output[retained_length] = '.';
-        output[retained_length + 1U] = '.';
-        output[retained_length + 2U] = '.';
-        memcpy(output + retained_length + 3U, note, note_length + 1U);
-        return true;
-    }
-    memcpy(output + output_length, note, note_length + 1U);
-    return true;
 }
 
 static enum sn_decoder_module decoder_module_for_packet(
@@ -301,6 +267,14 @@ static enum sn_decoder_module decoder_module_for_packet(
     return SN_DECODER_UDP;
 }
 
+const char *sn_protocol_security_advisory(const struct sn_packet_view *packet)
+{
+    if (packet == NULL) {
+        return "";
+    }
+    return security_note(packet, decoder_module_for_packet(packet));
+}
+
 static bool decode_with_policy(
     const struct sn_packet_view *packet,
     char *output,
@@ -336,19 +310,12 @@ static bool decode_with_policy(
         if (sn_protocol_decode_extension(packet, extension_output,
                                          sizeof(extension_output)) &&
             copy_extension_output(extension_output, output, output_capacity)) {
-            if (append_security_note(packet, module, output, output_capacity)) {
-                return true;
-            }
-            output[0] = '\0';
-            return false;
+            return true;
         }
         output[0] = '\0';
     }
     if (raw_mode) {
         decoded = decode_raw_ipv4(packet, output, output_capacity);
-        if (decoded) {
-            decoded = append_security_note(packet, module, output, output_capacity);
-        }
         if (!decoded) {
             output[0] = '\0';
         }
@@ -377,9 +344,6 @@ static bool decode_with_policy(
     }
     if (!decoded && show_raw_flows) {
         decoded = decode_raw_ipv4(packet, output, output_capacity);
-    }
-    if (decoded) {
-        decoded = append_security_note(packet, module, output, output_capacity);
     }
     if (!decoded) {
         output[0] = '\0';
