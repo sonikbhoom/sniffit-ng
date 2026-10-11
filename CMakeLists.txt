@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 project(sniffit_ng VERSION 0.1.0 LANGUAGES C)
 
+include(GNUInstallDirs)
+
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
@@ -117,6 +119,16 @@ target_link_libraries(sniffit_ui PUBLIC sniffit_monitor PkgConfig::NCURSESW)
 add_executable(sniffit-ng src/main.c)
 target_link_libraries(sniffit-ng PRIVATE
     sniffit_ui sniffit_payload_log sniffit_pcap_writer sniffit_privilege sniffit_config
+)
+
+install(TARGETS sniffit-ng
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+install(FILES README.md
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/sniffit-ng
+)
+install(FILES sniffit-ng.conf.example
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/sniffit-ng
 )
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
@@ -318,3 +330,31 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND SNIFFIT_NG_ENABLE_SANITIZERS)
         target_link_options(${target} PUBLIC -fsanitize=address,undefined)
     endforeach()
 endif()
+
+set(CPACK_PACKAGE_NAME "sniffit-ng")
+set(CPACK_PACKAGE_VENDOR "Sniffit NG contributors")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Defensive network protocol monitor")
+set(CPACK_PACKAGE_DESCRIPTION
+    "Sniffit NG is a privilege-reduced network monitor with bounded Ethernet/SLL IPv4 parsing and a curses flow viewer.")
+set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+set(CPACK_PACKAGE_CONTACT "Sniffit NG maintainers")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/sonikbhoom/sniffit-ng")
+set(CPACK_PACKAGE_DIRECTORY "${CMAKE_BINARY_DIR}/packages")
+set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${PROJECT_VERSION}-${CMAKE_SYSTEM_PROCESSOR}")
+set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(CPACK_GENERATOR "RPM;DEB")
+    set(CPACK_RPM_PACKAGE_RELEASE "1")
+    set(CPACK_RPM_PACKAGE_LICENSE "NOASSERTION")
+    set(CPACK_RPM_PACKAGE_AUTOREQPROV ON)
+    set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Sniffit NG maintainers")
+    set(CPACK_DEBIAN_PACKAGE_SECTION "net")
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS
+        "libc6, libncursesw6, libtinfo6, libpcap0.8 | libpcap0.8t64")
+    set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+else()
+    set(CPACK_GENERATOR "TGZ")
+endif()
+
+include(CPack)

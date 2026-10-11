@@ -73,6 +73,17 @@ getcap /usr/local/bin/sniffit-ng
 
 The application makes only `CAP_NET_RAW` effective while opening pcap, then clears capabilities and sets `no_new_privs` before parsing packets, writing logs, or entering curses. A sudo invocation from a regular user is also supported when `SUDO_UID` and `SUDO_GID` are available. Do not set file capabilities on a developer-writable build artifact: any user able to execute that binary can capture traffic available to the process. Promiscuous mode may require additional privilege and is not granted by `CAP_NET_RAW` alone. The parser borrows pointers into the caller's capture buffer; those views are valid only until the next read from the source.
 
+### RPM and DEB Packages
+
+On Linux, CPack generates RPM and DEB packages from the install rules. Build a non-sanitized release tree with tests disabled, then invoke the `package` target:
+
+```sh
+cmake -S . -B build/release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+cmake --build build/release --target package
+```
+
+Packages are written to `build/release/packages/`. Runtime dependencies are declared/discovered by CPack; generated packages do not set file capabilities. Configure capture privilege separately after installation, and never assign `CAP_NET_RAW` to a developer-writable executable. This source tree currently has no license, so package creation does not grant redistribution rights; resolve licensing before publishing packages for general use.
+
 Persistent payload logging is disabled by default. To enable it for one offline replay, run `./build/sniffit-ng --read-pcap capture.pcap --payload-logging`; the program requires an interactive acknowledgment before opening the capture. It creates `sniffit-ng-payload.log` exclusively with owner-only permissions and writes validated payload bytes as hex. Use `--payload-log PATH` with `--payload-logging` to choose another new path; existing files and symlinks are not followed. Review the warning, confirm authorization and consent, protect the output, and delete it according to your retention policy. Without a controlling terminal, logging fails closed.
 
 ## ICMP Echo Payload Inspection
