@@ -1,4 +1,5 @@
 #include "protocol_decode_internal.h"
+#include "sniffit_ng/protocol_decode.h"
 
 #include <stdio.h>
 
@@ -19,7 +20,7 @@ bool sn_decode_udp(const struct sn_packet_view *packet,
     uint16_t source_port;
     uint16_t destination_port;
     uint16_t datagram_length;
-    char application[96];
+    char application[SN_PACKET_DECODE_TEXT_CAPACITY];
 
     if (packet == NULL || output == NULL || output_capacity == 0U ||
         !packet->transport_header_present || packet->transport == NULL ||
@@ -45,11 +46,8 @@ bool sn_decode_udp(const struct sn_packet_view *packet,
     }
     if ((source_port == 53U || destination_port == 53U) &&
         sn_decode_dns(packet->payload, packet->payload_length,
-                      application, sizeof(application))) {
-        return sn_decode_result_fits(snprintf(output, output_capacity,
-                        "UDP %u->%u len=%u payload=%zu; %s",
-                        source_port, destination_port, datagram_length,
-                        packet->payload_length, application), output_capacity);
+                      output, output_capacity)) {
+        return true;
     }
     if ((source_port == 161U || source_port == 162U ||
          destination_port == 161U || destination_port == 162U) &&

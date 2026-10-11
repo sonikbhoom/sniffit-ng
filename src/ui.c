@@ -325,7 +325,8 @@ static void draw_screen(struct sn_monitor *monitor,
     refresh();
 }
 
-static bool read_line(const char *prompt, char *buffer, size_t capacity)
+static bool read_line(const char *prompt, char *buffer, size_t capacity,
+                      int input_timeout_ms)
 {
     size_t maximum;
 
@@ -339,17 +340,20 @@ static bool read_line(const char *prompt, char *buffer, size_t capacity)
     clrtoeol();
     mvaddstr(LINES - 2, 0, prompt);
     refresh();
+    wtimeout(stdscr, -1);
     int result = getnstr(buffer, (int)maximum);
+    wtimeout(stdscr, input_timeout_ms);
     noecho();
     curs_set(0);
     return result != ERR;
 }
 
-static void set_ip_filter(const char *prompt, bool *enabled, uint8_t address[4])
+static void set_ip_filter(const char *prompt, bool *enabled, uint8_t address[4],
+                          int input_timeout_ms)
 {
     char input[64] = {0};
 
-    if (!read_line(prompt, input, sizeof(input))) {
+    if (!read_line(prompt, input, sizeof(input), input_timeout_ms)) {
         return;
     }
     if (strcasecmp(input, "all") == 0 || input[0] == '\0') {
@@ -359,13 +363,14 @@ static void set_ip_filter(const char *prompt, bool *enabled, uint8_t address[4])
     }
 }
 
-static void set_port_filter(const char *prompt, bool *enabled, uint16_t *port)
+static void set_port_filter(const char *prompt, bool *enabled, uint16_t *port,
+                            int input_timeout_ms)
 {
     char input[32] = {0};
     char *end = NULL;
     unsigned long value;
 
-    if (!read_line(prompt, input, sizeof(input))) {
+    if (!read_line(prompt, input, sizeof(input), input_timeout_ms)) {
         return;
     }
     if (input[0] == '\0') {
@@ -857,28 +862,32 @@ int sn_ui_run(struct sn_monitor *monitor,
         case '1':
         case KEY_F(1):
             set_ip_filter("Source host (IPv4 or all): ",
-                          &filter.source_ip_enabled, filter.source_ip);
+                          &filter.source_ip_enabled, filter.source_ip,
+                          capture_polling ? 50 : -1);
             selected = 0U;
             scroll_start = 0U;
             break;
         case '2':
         case KEY_F(2):
             set_ip_filter("Destination host (IPv4 or all): ",
-                          &filter.destination_ip_enabled, filter.destination_ip);
+                          &filter.destination_ip_enabled, filter.destination_ip,
+                          capture_polling ? 50 : -1);
             selected = 0U;
             scroll_start = 0U;
             break;
         case '3':
         case KEY_F(3):
             set_port_filter("Source port (0 for all): ",
-                            &filter.source_port_enabled, &filter.source_port);
+                            &filter.source_port_enabled, &filter.source_port,
+                            capture_polling ? 50 : -1);
             selected = 0U;
             scroll_start = 0U;
             break;
         case '4':
         case KEY_F(4):
             set_port_filter("Destination port (0 for all): ",
-                            &filter.destination_port_enabled, &filter.destination_port);
+                            &filter.destination_port_enabled, &filter.destination_port,
+                            capture_polling ? 50 : -1);
             selected = 0U;
             scroll_start = 0U;
             break;

@@ -144,6 +144,8 @@ int main(void)
     bool new_flow_visible_while_open;
     bool selected_counters_updated;
     bool details_followed_highlight;
+    bool source_filter_applied;
+    bool source_filter_cleared;
 
     terminal_size.ws_row = 30U;
     terminal_size.ws_col = 120U;
@@ -185,6 +187,33 @@ int main(void)
     assert(strstr(output, "DIRECTION") == NULL);
     assert(strstr(output, "IN?") == NULL);
     assert(strstr(output, "t priority") == NULL);
+
+    output[0] = '\0';
+    output_length = 0U;
+    assert(write(master_fd, "1", 1U) == 1);
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "host (IPv4 or all):", 1000));
+    assert(!read_until(master_fd, output, sizeof(output), &output_length,
+                       "__filter_input_probe__", 100));
+    assert(write(master_fd, "192.168.1.7\n", sizeof("192.168.1.7\n") - 1U) ==
+           (ssize_t)(sizeof("192.168.1.7\n") - 1U));
+    source_filter_applied = read_until(master_fd, output, sizeof(output),
+                                       &output_length, "192.168.1.7:All/0", 1000);
+    assert(source_filter_applied);
+
+    output[0] = '\0';
+    output_length = 0U;
+    assert(write(master_fd, "1", 1U) == 1);
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "host (IPv4 or all):", 1000));
+    assert(write(master_fd, "all\n", sizeof("all\n") - 1U) ==
+           (ssize_t)(sizeof("all\n") - 1U));
+    source_filter_cleared = read_until(master_fd, output, sizeof(output),
+                                       &output_length, "All:All/0", 1000);
+    assert(source_filter_cleared);
+
+    output[0] = '\0';
+    output_length = 0U;
     assert(write(master_fd, "\n", 1U) == 1);
     details_opened = read_until(master_fd, output, sizeof(output), &output_length,
                                 "TCP flow", 1000);

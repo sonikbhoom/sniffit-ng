@@ -150,8 +150,8 @@ static void test_dns_udp_tcp_and_compression_bounds(void)
     udp[4] = 0U;
     udp[5] = (uint8_t)packet.transport_length;
     assert(sn_protocol_decode(&packet, output, sizeof(output)));
-    assert(strstr(output, "DNS query opcode=0 rcode=0 q=1 an=0 ns=0 ar=0") != NULL);
-    assert(strstr(output, "name=www.example.com type=A/1 class=1") != NULL);
+    assert(strstr(output, "DNS REQUEST id=0x1234 opcode=QUERY RD=1") != NULL);
+    assert(strstr(output, "Question: www.example.com A/IN") != NULL);
 
     memcpy(response, query, sizeof(query));
     response[2] = 0x81U;
@@ -172,9 +172,10 @@ static void test_dns_udp_tcp_and_compression_bounds(void)
     packet.payload = response;
     packet.payload_length = sizeof(response);
     assert(sn_protocol_decode(&packet, output, sizeof(output)));
-    assert(strstr(output, "DNS response opcode=0 rcode=0 q=1 an=1") != NULL);
-    assert(strstr(output, "name=www.example.com type=A/1 class=1") != NULL);
-    assert(strstr(output, "203.0.113.9") == NULL);
+    assert(strstr(output, "DNS RESPONSE id=0x1234 status=NOERROR opcode=QUERY") != NULL);
+    assert(strstr(output, "Question: www.example.com A/IN") != NULL);
+    assert(strstr(output, "Answer: A=203.0.113.9 ttl=60") != NULL);
+    assert(strstr(output, "Counts: answers=1 authority=0 additional=0") != NULL);
 
     malformed[5] = 0U;
     malformed[5] = 1U;
@@ -203,7 +204,75 @@ static void test_dns_udp_tcp_and_compression_bounds(void)
     packet.payload = tcp_payload;
     packet.payload_length = sizeof(tcp_payload);
     assert(sn_protocol_decode(&packet, output, sizeof(output)));
-    assert(strstr(output, "DNS query opcode=0 rcode=0 q=1 an=0") != NULL);
+    assert(strstr(output, "DNS REQUEST id=0x1234 opcode=QUERY RD=1") != NULL);
+}
+
+static void test_dns_txt_content_stays_hidden(void)
+{
+    static const uint8_t response[] = {
+        0x12U, 0x35U, 0x81U, 0x80U, 0x00U, 0x01U, 0x00U, 0x01U,
+        0x00U, 0x00U, 0x00U, 0x00U,
+        0x01U, 'x', 0x03U, 'c', 'o', 'm', 0x00U, 0x00U, 0x10U, 0x00U, 0x01U,
+        0xc0U, 0x0cU, 0x00U, 0x10U, 0x00U, 0x01U, 0x00U, 0x00U, 0x00U, 0x3cU,
+        0x00U, 0x07U, 0x06U, 's', 'e', 'c', 'r', 'e', 't'
+    };
+    uint8_t udp[8] = {0U, 53U, 0x30U, 0x39U, 0U, 0U, 0U, 0U};
+    struct sn_packet_view packet = {0};
+    char output[SN_PACKET_DECODE_TEXT_CAPACITY];
+
+    udp[4] = 0U;
+    udp[5] = (uint8_t)(sizeof(udp) + sizeof(response));
+    packet.protocol = 17U;
+    packet.transport = udp;
+    packet.transport_length = sizeof(udp) + sizeof(response);
+    packet.transport_header_present = true;
+    packet.payload = response;
+    packet.payload_length = sizeof(response);
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "TXT strings=1 bytes=7 content=hidden ttl=60") != NULL);
+    assert(strstr(output, "secret") == NULL);
+}
+
+static void test_dns_maximum_wire_name_is_bounded_in_output(void)
+{
+    const uint8_t label_lengths[] = {63U, 63U, 63U, 61U};
+    uint8_t query[12U + 255U + 4U] = {0};
+    uint8_t udp[8] = {0x30U, 0x39U, 0U, 53U, 0U, 0U, 0U, 0U};
+    struct sn_packet_view packet = {0};
+    char output[SN_PACKET_DECODE_TEXT_CAPACITY];
+    size_t cursor = 12U;
+    uint16_t udp_length = (uint16_t)(sizeof(udp) + sizeof(query));
+
+    query[0] = 0x56U;
+    query[1] = 0x79U;
+    query[2] = 0x01U;
+    query[5] = 0x01U;
+    for (size_t index = 0U; index < sizeof(label_lengths); ++index) {
+        query[cursor++] = label_lengths[index];
+        memset(query + cursor, 'a', label_lengths[index]);
+        cursor += label_lengths[index];
+    }
+    query[cursor++] = 0U;
+    query[cursor++] = 0U;
+    query[cursor++] = 1U;
+    query[cursor++] = 0U;
+    query[cursor++] = 1U;
+    assert(cursor == sizeof(query));
+
+    udp[4] = (uint8_t)(udp_length >> 8);
+    udp[5] = (uint8_t)(udp_length & 0xffU);
+    packet.protocol = 17U;
+    packet.transport = udp;
+    packet.transport_length = sizeof(udp) + sizeof(query);
+    packet.transport_header_present = true;
+    packet.payload = query;
+    packet.payload_length = sizeof(query);
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "DNS REQUEST id=0x5679") != NULL);
+    assert(output[sizeof(output) - 4U] == '.');
+    assert(output[sizeof(output) - 3U] == '.');
+    assert(output[sizeof(output) - 2U] == '.');
+    assert(output[sizeof(output) - 1U] == '\0');
 }
 
 static void test_dhcp4_discover_offer_and_malformed_options(void)
@@ -617,6 +686,8 @@ int main(void)
     test_http_summaries_hide_paths_and_sensitive_headers();
     test_http_extension_is_disabled_by_default();
     test_dns_udp_tcp_and_compression_bounds();
+    test_dns_txt_content_stays_hidden();
+    test_dns_maximum_wire_name_is_bounded_in_output();
     test_dhcp4_discover_offer_and_malformed_options();
     test_tls_record_metadata_on_tcp();
     test_rtp_rtcp_metadata_over_udp();
