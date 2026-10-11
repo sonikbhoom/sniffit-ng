@@ -210,7 +210,9 @@ enum sn_flow_update_result sn_flow_table_update(
         sample->direction = (uint8_t)key.direction;
         sample->identifier = packet->icmp_identifier;
         sample->sequence = packet->icmp_sequence;
+        sample->original_payload_length = packet->payload_length;
         sample->payload_length = sample_length;
+        sample->payload_truncated = packet->payload_length > sample_length;
         if (sample_length > 0U && packet->payload != NULL) {
             memcpy(sample->payload, packet->payload, sample_length);
         }

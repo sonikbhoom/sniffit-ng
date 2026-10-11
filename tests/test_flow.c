@@ -172,7 +172,7 @@ static void test_icmp_payload_requires_opt_in_and_is_bounded(void)
     packet.transport_length = sizeof(icmp_header) + sizeof(payload);
     packet.transport_header_present = true;
     packet.payload = payload;
-    packet.payload_length = sizeof(payload);
+    packet.payload_length = 128U;
 
     sn_flow_table_init(&table, 100U);
     assert(sn_flow_table_update(&table, &packet, 1U, &flow) == SN_FLOW_CREATED);
@@ -187,7 +187,19 @@ static void test_icmp_payload_requires_opt_in_and_is_bounded(void)
     assert(flow->icmp_history[latest].direction == 0U);
     assert(flow->icmp_history[latest].identifier == 0x1234U);
     assert(flow->icmp_history[latest].sequence == 7U);
+    assert(flow->icmp_history[latest].payload_length == 128U);
+    assert(flow->icmp_history[latest].original_payload_length == 128U);
+    assert(!flow->icmp_history[latest].payload_truncated);
+    assert(memcmp(flow->icmp_history[latest].payload, payload,
+                  128U) == 0);
+
+    packet.payload_length = sizeof(payload);
+    assert(sn_flow_table_update(&table, &packet, 3U, &flow) == SN_FLOW_UPDATED);
+    latest = (flow->icmp_history_next + SN_FLOW_ICMP_HISTORY_CAPACITY - 1U) %
+             SN_FLOW_ICMP_HISTORY_CAPACITY;
     assert(flow->icmp_history[latest].payload_length == SN_FLOW_ICMP_SAMPLE_CAPACITY);
+    assert(flow->icmp_history[latest].original_payload_length == sizeof(payload));
+    assert(flow->icmp_history[latest].payload_truncated);
     assert(memcmp(flow->icmp_history[latest].payload, payload,
                   SN_FLOW_ICMP_SAMPLE_CAPACITY) == 0);
 
@@ -195,10 +207,10 @@ static void test_icmp_payload_requires_opt_in_and_is_bounded(void)
     packet.source_ipv4[3] = 2U;
     packet.destination_ipv4[3] = 1U;
     packet.icmp_sequence = 8U;
-    assert(sn_flow_table_update(&table, &packet, 3U, &flow) == SN_FLOW_UPDATED);
+    assert(sn_flow_table_update(&table, &packet, 4U, &flow) == SN_FLOW_UPDATED);
     latest = (flow->icmp_history_next + SN_FLOW_ICMP_HISTORY_CAPACITY - 1U) %
              SN_FLOW_ICMP_HISTORY_CAPACITY;
-    assert(flow->icmp_history_count == 2U);
+    assert(flow->icmp_history_count == 3U);
     assert(flow->icmp_history[latest].type == 0U);
     assert(flow->icmp_history[latest].direction == 1U);
     assert(flow->icmp_history[latest].sequence == 8U);

@@ -218,7 +218,9 @@ static void draw_screen(struct sn_monitor *monitor,
     }
     draw_title_line(title, local_address_start, local_address_length,
                     colors_enabled);
-    mvprintw(1, 0, "PROTO  ENDPOINT A                         ENDPOINT B                         PACKETS A>B/B>A");
+    mvprintw(1, 0, "%-5s %-15s:%-5s -> %-15s:%-5s %s",
+             "PROTO", "ENDPOINT A", "PORT", "ENDPOINT B", "PORT",
+             "PACKETS A>B/B>A");
     mvhline(2, 0, ACS_HLINE, COLS);
 
     visible_rows = (size_t)(LINES - (show_stats ? 14 : 5));
@@ -400,25 +402,32 @@ static void append_icmp_sample(WINDOW *history,
     const char *type_name = sample->type == 8U ? "request" : "reply";
     const char *direction = sample->direction == 0U ? "A>B" : "B>A";
 
-    (void)wprintw(history, "ICMP Echo %s %s id=%u seq=%u (%zu bytes)\n",
-                  type_name, direction, sample->identifier, sample->sequence,
-                  sample->payload_length);
+    if (sample->payload_truncated) {
+        (void)wprintw(history,
+                      "ICMP Echo %s %s id=%u seq=%u (%zu of %zu bytes shown; truncated)\n",
+                      type_name, direction, sample->identifier, sample->sequence,
+                      sample->payload_length, sample->original_payload_length);
+    } else {
+        (void)wprintw(history, "ICMP Echo %s %s id=%u seq=%u (%zu bytes)\n",
+                      type_name, direction, sample->identifier, sample->sequence,
+                      sample->payload_length);
+    }
     if (sample->payload_length == 0U) {
         (void)waddstr(history, "  (empty payload)\n");
     }
-    for (size_t offset = 0U; offset < sample->payload_length; offset += 4U) {
-        char hex[SN_ICMP_DISPLAY_HEX_CAPACITY];
-        char ascii[SN_ICMP_DISPLAY_ASCII_CAPACITY];
-        size_t chunk_length = sample->payload_length - offset;
+    for (size_t offset = 0U; offset < sample->payload_length;
+         offset += SN_ICMP_DISPLAY_ROW_BYTES) {
+        char line[SN_ICMP_DISPLAY_LINE_CAPACITY];
+        size_t row_length = sample->payload_length - offset;
 
-        if (chunk_length > 4U) {
-            chunk_length = 4U;
+        if (row_length > SN_ICMP_DISPLAY_ROW_BYTES) {
+            row_length = SN_ICMP_DISPLAY_ROW_BYTES;
         }
-        if (sn_icmp_format_payload_row(sample->payload + offset, chunk_length,
-                                       hex, sizeof(hex), ascii, sizeof(ascii)) == 0U) {
+        if (sn_icmp_format_payload_display_row(offset, sample->payload + offset,
+                                              row_length, line, sizeof(line)) == 0U) {
             break;
         }
-        (void)wprintw(history, "  %04zu  %-11s |%s|\n", offset, hex, ascii);
+        (void)wprintw(history, "  %s\n", line);
     }
     (void)waddch(history, '\n');
 }

@@ -93,7 +93,7 @@ Payload logging is disabled by default. For an offline replay, `--payload-loggin
 
 ### Optional ICMP Echo Samples
 
-Connection summaries and protocol details work without payload inspection. `--inspect-payloads` enables sanitized ICMP Echo samples in the details view. Samples stay in memory: at most 16 records per connection and 64 payload bytes per record. This feature does not write payload data to disk. It is disabled by default and requires this active acknowledgment comment in the config file:
+Connection summaries and protocol details work without payload inspection. `--inspect-payloads` enables sanitized ICMP Echo samples in the details view. Samples stay in memory: at most 16 records per connection and 256 payload bytes per record. Longer payloads are truncated with their original size shown. This feature does not write payload data to disk. It is disabled by default and requires this active acknowledgment comment in the config file:
 
 ```ini
 inspect_payloads = true
