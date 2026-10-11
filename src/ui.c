@@ -14,6 +14,7 @@
 
 struct ui_detail_context {
     struct sn_monitor *monitor;
+    const struct sn_network_info *network_info;
     const struct sn_ui_flow_filter *filter;
     const struct sn_flow **flows;
     size_t flow_count;
@@ -93,6 +94,7 @@ static void draw_filter_line(const struct sn_ui_flow_filter *filter)
 }
 
 static void draw_screen(struct sn_monitor *monitor,
+                        const struct sn_network_info *network_info,
                         const struct sn_ui_flow_filter *filter,
                         const struct sn_flow **flows,
                         size_t flow_count,
@@ -104,6 +106,8 @@ static void draw_screen(struct sn_monitor *monitor,
                         const char *capture_status,
                         const struct sn_monitor_rates *rates)
 {
+    char title[256] = "Sniffit NG | Network monitor";
+    size_t title_length;
     size_t visible_rows;
 
     erase();
@@ -114,10 +118,35 @@ static void draw_screen(struct sn_monitor *monitor,
         return;
     }
 
+    title_length = strlen(title);
+    if (network_info != NULL && network_info->interface_name[0] != '\0') {
+        if (network_info->local_ipv4[0] != '\0') {
+            (void)snprintf(title + title_length, sizeof(title) - title_length,
+                           " | %s %s", network_info->interface_name,
+                           network_info->local_ipv4);
+        } else {
+            (void)snprintf(title + title_length, sizeof(title) - title_length,
+                           " | %s", network_info->interface_name);
+        }
+        if (network_info->external_ipv4[0] != '\0') {
+            title_length = strlen(title);
+            (void)snprintf(title + title_length, sizeof(title) - title_length,
+                           " (external %s)", network_info->external_ipv4);
+        }
+    }
+    title_length = strlen(title);
+    if (recording_active) {
+        (void)snprintf(title + title_length, sizeof(title) - title_length,
+                       " | RECORDING ACTIVE");
+    }
+    title_length = strlen(title);
+    if (payload_inspection_active) {
+        (void)snprintf(title + title_length, sizeof(title) - title_length,
+                       " | PAYLOAD DISPLAY ENABLED");
+    }
+
     attron(A_BOLD);
-        mvprintw(0, 0, "Sniffit NG | Ethernet / IPv4 monitor%s%s",
-                 recording_active ? " | RECORDING ACTIVE" : "",
-                 payload_inspection_active ? " | ICMP PAYLOAD DISPLAY ENABLED" : "");
+        mvaddnstr(0, 0, title, COLS - 1);
     attroff(A_BOLD);
     mvprintw(1, 0, "PROTO  ENDPOINT A                         ENDPOINT B                         PACKETS A>B/B>A");
     mvhline(2, 0, ACS_HLINE, COLS);
@@ -154,8 +183,8 @@ static void draw_screen(struct sn_monitor *monitor,
         }
     }
     if (visible_rows == 0U) {
-        mvaddstr(3, 0, flow_count == 0U ? "No flows in this capture." :
-                                          "No flows match the current masks.");
+        mvaddstr(3, 0, flow_count == 0U ? "No connections seen yet." :
+                                          "No connections match these filters.");
     }
 
     if (show_stats) {
@@ -198,7 +227,7 @@ static void draw_screen(struct sn_monitor *monitor,
     if (capture_status != NULL) {
         mvaddnstr(LINES - 1, 0, capture_status, COLS - 1);
     } else {
-        mvaddstr(LINES - 1, 0, " j/k or arrows: move  1-4: masks  Enter: details  n: stats  r: reset  q: quit ");
+        mvaddstr(LINES - 1, 0, " j/k or arrows: move  1-4: filters  Enter: details  n: stats  r: reset  q: quit ");
     }
     clrtoeol();
     attroff(A_REVERSE);
@@ -458,7 +487,8 @@ static void draw_detail_contents(struct ui_detail_context *context,
     refresh_detail_panel(panel, history, panel_x);
 }
 
-static void redraw_detail_background(struct ui_detail_context *context)
+static void redraw_detail_background(struct ui_detail_context *context,
+                                     const struct sn_flow *preferred_flow)
 {
     size_t visible_rows = LINES > (context->show_stats ? 14 : 5) ?
         (size_t)(LINES - (context->show_stats ? 14 : 5)) : 1U;
@@ -467,6 +497,14 @@ static void redraw_detail_background(struct ui_detail_context *context)
                                         context->flows);
     if (context->flow_count == 0U) {
         return;
+    }
+    if (preferred_flow != NULL) {
+        for (size_t index = 0U; index < context->flow_count; ++index) {
+            if (same_flow_identity(context->flows[index], preferred_flow)) {
+                *context->selected = index;
+                break;
+            }
+        }
     }
     if (*context->selected >= context->flow_count) {
         *context->selected = context->flow_count - 1U;
@@ -479,7 +517,7 @@ static void redraw_detail_background(struct ui_detail_context *context)
 
 static void draw_detail_background(struct ui_detail_context *context)
 {
-    draw_screen(context->monitor, context->filter, context->flows,
+    draw_screen(context->monitor, context->network_info, context->filter, context->flows,
                 context->flow_count, *context->selected, *context->scroll_start,
                 context->show_stats, context->recording_active,
                 context->payload_inspection_active, *context->capture_status,
@@ -530,6 +568,20 @@ static void show_details(struct ui_detail_context *context,
                                            context->payload_inspection_active,
                                            &seen_count, &seen_next,
                                            &seen_decode_count, &seen_decode_next, panel_x);
+                    redraw_detail_background(context, &identity);
+                    draw_detail_background(context);
+                    if (context->flow_count > 0U) {
+                        const struct sn_flow *highlighted =
+                            context->flows[*context->selected];
+                        bool focus_changed = !same_flow_identity(&identity, highlighted);
+
+                        identity = *highlighted;
+                        draw_detail_contents(context, &identity, panel, history, panel_x,
+                                             &seen_count, &seen_next,
+                                             &seen_decode_count, &seen_decode_next,
+                                             focus_changed);
+                        refresh_detail_panel(panel, history, panel_x);
+                    }
                 }
             }
             continue;
@@ -552,7 +604,7 @@ static void show_details(struct ui_detail_context *context,
 
         int direction = sn_ui_detail_navigation_direction(key, KEY_UP, KEY_DOWN);
         if (direction != 0) {
-            redraw_detail_background(context);
+            redraw_detail_background(context, &identity);
             if (context->flow_count > 0U) {
                 size_t next = *context->selected;
                 if (direction < 0 && next > 0U) {
@@ -596,6 +648,7 @@ static void reset_monitor(struct sn_monitor *monitor)
 }
 
 int sn_ui_run(struct sn_monitor *monitor,
+          const struct sn_network_info *network_info,
               bool recording_active,
               bool payload_inspection_active,
               sn_ui_poll_callback poll_capture,
@@ -646,6 +699,7 @@ int sn_ui_run(struct sn_monitor *monitor,
                                           visible_rows, scroll_start);
         struct ui_detail_context detail_context = {
             .monitor = monitor,
+            .network_info = network_info,
             .filter = &filter,
             .flows = flows,
             .flow_count = flow_count,
@@ -658,7 +712,7 @@ int sn_ui_run(struct sn_monitor *monitor,
             .capture_status = &capture_status,
             .rates = rates_ready ? &rates : (capture_polling ? &rates : NULL)
         };
-        draw_screen(monitor, &filter, flows, flow_count, selected, scroll_start, show_stats,
+        draw_screen(monitor, network_info, &filter, flows, flow_count, selected, scroll_start, show_stats,
                 recording_active, payload_inspection_active, capture_status,
                 detail_context.rates);
         key = getch();

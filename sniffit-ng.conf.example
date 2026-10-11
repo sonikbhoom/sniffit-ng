@@ -2,6 +2,11 @@
 # Payload inspection is disabled unless explicitly enabled.
 inspect_payloads = false
 
+# External IP lookup is disabled unless explicitly enabled. If the selected
+# interface has an RFC 1918 IPv4 address, enabling this sends one HTTPS request
+# to ifconfig.io when live capture starts.
+resolve_external_addr = false
+
 # To acknowledge payload inspection, enable the option and make the next line active
 # by removing its leading '# ' characters. This acknowledgment is stored in this
 # config file and will not be prompted on every run.

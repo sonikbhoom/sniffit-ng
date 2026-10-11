@@ -237,7 +237,8 @@ static int replay_pcap(const char *path,
     if (status != 0) {
         return status;
     }
-    return sn_ui_run(&monitor, payload_logging_enabled || pcap_recording_enabled,
+    return sn_ui_run(&monitor, NULL,
+                     payload_logging_enabled || pcap_recording_enabled,
                      payload_inspection_enabled,
                      NULL, NULL);
 }
@@ -246,6 +247,7 @@ static int run_live_capture(const char *device,
                             bool promiscuous,
                             bool payload_logging_enabled,
                             bool payload_inspection_enabled,
+                            bool resolve_external_addr,
                             const char *payload_log_path,
                             const char *pcap_output_path)
 {
@@ -254,6 +256,7 @@ static int run_live_capture(const char *device,
     struct sn_payload_log *payload_log = NULL;
     struct sn_pcap_writer *pcap_writer = NULL;
     struct sn_monitor monitor;
+    struct sn_network_info network_info;
     struct live_context live;
     enum sn_packet_link_type link_type;
     int ui_result;
@@ -287,6 +290,13 @@ static int run_live_capture(const char *device,
         sn_capture_close(capture);
         return 1;
     }
+    sn_network_info_init(&network_info, device);
+    (void)sn_network_info_find_local_ipv4(&network_info);
+    if (resolve_external_addr &&
+        sn_ipv4_is_rfc1918(network_info.local_ipv4) &&
+        !sn_network_info_resolve_external_ipv4(&network_info)) {
+        fprintf(stderr, "sniffit-ng: external IPv4 lookup failed; continuing with local address only\n");
+    }
     if (payload_logging_enabled) {
         payload_log = sn_payload_log_open(payload_log_path, error, sizeof(error));
         if (payload_log == NULL) {
@@ -315,7 +325,8 @@ static int run_live_capture(const char *device,
     live.payload_log = payload_log;
     live.pcap_writer = pcap_writer;
     live.error[0] = '\0';
-    ui_result = sn_ui_run(&monitor, payload_logging_enabled || pcap_writer != NULL,
+    ui_result = sn_ui_run(&monitor, &network_info,
+                          payload_logging_enabled || pcap_writer != NULL,
                           payload_inspection_enabled,
                           poll_live_capture, &live);
 
@@ -420,5 +431,6 @@ int main(int argc, char **argv)
     }
     return run_live_capture(interface_name, promiscuous,
                             payload_logging_enabled, payload_inspection_enabled,
+                            config.resolve_external_addr,
                             payload_log_path, pcap_output_path);
 }

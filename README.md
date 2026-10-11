@@ -1,38 +1,33 @@
 # Sniffit NG
 
-Sniffit NG is a security-focused C successor to the legacy Sniffit monitor, developed in a separate source tree. It supports bounded Ethernet and Linux cooked v1 (SLL) IPv4 parsing, offline pcap replay, privilege-reduced live capture, bidirectional flow summaries, and an ncurses monitor. Other libpcap link types are rejected unless explicitly implemented and tested.
+## Executive Summary
+
+Sniffit NG is a lightweight terminal network monitor and packet analyzer. Watch a network interface live or open a saved capture. Sniffit groups packets into connections, shows traffic in both directions, and displays selected details about supported protocols. This can help you see whether a connection attempt received a reply and where an exchange may have stopped. It cannot prove that an application worked or determine whether traffic is malicious.
+
+Use Sniffit NG only on systems and networks you own or have permission to monitor. Normal display shows summaries, not packet contents. Packet recording and payload viewing are separate, opt-in features with privacy checks.
+
+## Screenshots
+
+![Sniffit NG live connection monitor with addresses redacted](examples/main-redacted.png)
+
+![Sniffit NG connection inspection pane with addresses redacted](examples/inspection_window-redacted.png)
+
+### What it currently supports
+
+- Live capture and saved pcap files on Ethernet and Linux cooked v1 (SLL) links.
+- IPv4 connections, packet counts, traffic rates, address and port filters, and packet error counts.
+- Short summaries for TCP, UDP, HTTP/1.x, TLS records, DNS, DHCPv4/BOOTP, NTP, SNMP, Syslog, RADIUS, TACACS+, QUIC, RTP/RTCP, ICMP, IGMP, and VRRP.
+- A terminal view with connection details and basic source/destination filters.
+
+These are summaries, not complete protocol decoders. IPv6 is not yet supported. TCP is not reassembled across packets, so a message split between packets may be missed. HTTPS contents are not decrypted. Sniffit limits how many connections and details it keeps in memory. Multi-day use still needs longer testing.
+
+Select a connection and press Enter to see details. Use arrow keys or `j`/`k` to move between connections. Keys `1` through `4` set source/destination address and port filters. These filters change what is displayed, not what is captured or counted. See the [development plan](PLAN.md) for upcoming filters, display improvements, and screenshots.
 
 This repository currently has no license. Public visibility does not itself grant permission to reuse, modify, or redistribute the code.
 
-## Monitor and Protocol Decoding
-
-In the live curses view, select a flow and press Enter to open the inspection pane on the right. The flow list remains visible on the left (about 40% of the terminal); the detail pane uses the remaining width. New records append to a bounded scrolling history instead of replacing the pane. Use arrow keys or `j`/`k` to switch the inspected flow without closing it; other keys close the pane.
-
-Packet decoding is protocol-wide, not limited to ICMP. Active metadata summaries currently include TCP, packet-local HTTP/1.x, TLS record metadata, DNS over UDP/TCP, DHCPv4/BOOTP, generic UDP, NTP, SNMP, Syslog, RADIUS, TACACS+, QUIC, RTP/RTCP, ICMP, IGMP, and VRRP. Each flow retains at most 16 recent metadata records. Fixed service hints are derived only from protocol and port, never packet content.
-
-HTTP summaries include request method and a validated Host, or response status plus allowlisted Server, Content-Type, and numeric Content-Length fields. Paths, query strings, cookies, Set-Cookie, authorization headers, and bodies are omitted. TCP stream reassembly is not implemented, so HTTP fields split across packets may not be recognized. HTTPS is not decoded as plaintext HTTP.
-
-DNS summaries include query/response, opcode/rcode, section counts, and the first safely decoded question name/type/class. Compression pointers are bounded and checked for loops; answer data and TXT values are not displayed. TCP DNS is decoded from complete length-prefixed messages in one packet; stream reassembly is not implemented.
-
-TLS summaries include record version/type and packet-local handshake type/length. SNI, certificates, and record contents are not decoded; split TLS records may be missed because stream reassembly is not implemented.
-
-QUIC summaries expose invariant-header version/type and connection-ID lengths, or only packet length for short headers; connection IDs and protected bytes are not shown. RTP/RTCP summaries report validated sequence/header identifiers, packet type/counts, and lengths without media data. Syslog shows only PRI/facility/severity and message length. RADIUS and TACACS+ show packet-level identifiers/type/counts while omitting attribute values and authentication data.
-
-DHCPv4/BOOTP summaries include the operation or message type, transaction ID, client hardware type/address, lease duration, and option count. DHCP options are length-checked; values other than the explicitly summarized fields are omitted.
-
-NTP summaries include version, mode, leap indicator, stratum, poll/precision, and a hexadecimal reference ID; NTP timestamps are omitted. SNMP summaries include version, PDU type, request ID, and varbind count; community strings and varbind values are never displayed.
-
-**Planned modules:** Source files also exist for ICMPv6/Neighbor Discovery, DHCPv6, OSPFv3/RIPng, ARP, LLDP/CDP, STP/RSTP, LACP, BGP, OSPFv2, IS-IS, RIP, HSRP/GLBP, MPLS, GRE, IP-in-IP, VXLAN, and Geneve. These are inert placeholders, not plugins or supported decoders: they are compiled but are not connected to the dispatcher and always report “not decoded.” They require their listed parser prerequisites and tests before activation.
-
-HTTP analysts can supply an optional compile-time metadata extension source with `-DSNIFFIT_NG_CUSTOM_HTTP_DECODER_SOURCE=/path/to/http_extension.c`. Implement `sn_http_decode_extension` as declared in [`include/sniffit_ng/http_decode_extension.h`](include/sniffit_ng/http_decode_extension.h). The hook receives one bounded TCP payload span and may add a short printable summary. Its default implementation is inert. This is a trusted source-code customization point, not a runtime full-disclosure switch or a built-in raw dump.
-
-ICMP Echo payload samples are a separate, opt-in feature controlled by the acknowledged inspection setting below. Other protocol payload contents are not retained by built-in decoders.
-
-Flow masks affect which connections are shown, not which packets are captured or counted. Source and destination host/port masks are optional and combine as endpoint pairs; because each flow is bidirectional, either traffic direction can satisfy the pair. Setting a host mask to `all` or a port mask to `0` clears that individual mask. Flows are listed deterministically by protocol and endpoints.
-
 ## Build and test
 
-Requirements: C17 compiler, CMake 3.16 or newer, pkg-config, libpcap, and ncursesw development files.
+Requirements: C17 compiler, CMake 3.16 or newer, pkg-config, and libpcap, ncursesw, and libcurl development files.
 
 ```sh
 cmake -S . -B build -DSNIFFIT_NG_ENABLE_SANITIZERS=ON
@@ -63,7 +58,7 @@ cmake --build build/fuzz --target fuzz_packet
 
 The harness tries raw inputs and structured IPv4 frames over Ethernet/SLL, including TCP, UDP, ICMP, IGMP, and VRRP. Use a persistent corpus and longer runs for sustained fuzzing.
 
-The viewer supports offline pcap replay and live capture with `--interface DEVICE` on Ethernet and Linux cooked v1 (SLL) links. Live mode defaults to non-promiscuous capture; `--promiscuous` must be explicitly requested. On Linux, install a protected, root-owned copy with `CAP_NET_RAW` in its permitted set to avoid running the full application through `sudo`:
+Live capture uses non-promiscuous mode by default. Request promiscuous capture explicitly with `--promiscuous`. On Linux, capture can use a protected, root-owned installation with `CAP_NET_RAW` instead of running the whole program as root:
 
 ```sh
 sudo setcap cap_net_raw+p /usr/local/bin/sniffit-ng
@@ -71,7 +66,7 @@ getcap /usr/local/bin/sniffit-ng
 /usr/local/bin/sniffit-ng --interface lo
 ```
 
-The application makes only `CAP_NET_RAW` effective while opening pcap, then clears capabilities and sets `no_new_privs` before parsing packets, writing logs, or entering curses. A sudo invocation from a regular user is also supported when `SUDO_UID` and `SUDO_GID` are available. Do not set file capabilities on a developer-writable build artifact: any user able to execute that binary can capture traffic available to the process. Promiscuous mode may require additional privilege and is not granted by `CAP_NET_RAW` alone. The parser borrows pointers into the caller's capture buffer; those views are valid only until the next read from the source.
+Sniffit uses that capability only while opening the capture source, then drops it before processing packets or entering the terminal view. Never set capabilities on a binary that ordinary users can modify. Promiscuous capture may need additional privileges. Only Ethernet and Linux cooked v1 (SLL) are supported currently. In live mode, the title bar shows the selected interface and its IPv4 address when available.
 
 ### RPM and DEB Packages
 
@@ -84,17 +79,40 @@ cmake --build build/release --target package
 
 Packages are written to `build/release/packages/`. Runtime dependencies are declared/discovered by CPack; generated packages do not set file capabilities. Configure capture privilege separately after installation, and never assign `CAP_NET_RAW` to a developer-writable executable. This source tree currently has no license, so package creation does not grant redistribution rights; resolve licensing before publishing packages for general use.
 
-Persistent payload logging is disabled by default. To enable it for one offline replay, run `./build/sniffit-ng --read-pcap capture.pcap --payload-logging`; the program requires an interactive acknowledgment before opening the capture. It creates `sniffit-ng-payload.log` exclusively with owner-only permissions and writes validated payload bytes as hex. Use `--payload-log PATH` with `--payload-logging` to choose another new path; existing files and symlinks are not followed. Review the warning, confirm authorization and consent, protect the output, and delete it according to your retention policy. Without a controlling terminal, logging fails closed.
+## Privacy and Ethical Use
 
-## ICMP Echo Payload Inspection
+Only monitor systems and networks you own or are explicitly authorized to inspect. Respect consent and applicable law. Collect only what you need, protect any saved data, set a retention period, and delete it when it is no longer needed.
 
-Flow summaries and protocol metadata work without payload inspection. `--inspect-payloads` enables the Enter detail view to display sanitized ICMP Echo payload records. At most 16 recent records per flow are kept in memory, each with at most 64 payload bytes; new records append to the open scrolling pane. This feature does not write payload bytes to disk. To avoid repeating the ethical acknowledgment, place this exact active comment in the config file:
+External address lookup is off by default. To opt in, add `resolve_external_addr = true` to the config file. If the selected live interface has an RFC 1918 IPv4 address, Sniffit makes one HTTPS request to `https://ifconfig.io/ip` at startup and shows the returned address in the title bar. The service can observe your public network address. No request is made for offline replay, public interface addresses, or when the setting is absent or false. If the lookup fails, monitoring continues with local interface information only.
+
+Normal flow summaries and protocol details do not display packet contents. Full-packet recording and payload viewing are more sensitive and remain separate, opt-in features.
+
+A pcap file can contain complete packet contents. `--write-pcap FILE` therefore requires an interactive privacy and authorization acknowledgment. Sniffit creates a new owner-only file and refuses to overwrite an existing file. Live recording starts only after capture privileges have been dropped.
+
+Payload logging is disabled by default. For an offline replay, `--payload-logging` writes validated payload bytes as hexadecimal. Use `--payload-log PATH` to choose a new output file. Sniffit asks for an interactive acknowledgment, creates the file exclusively with owner-only permissions, and fails closed if no terminal is available. Protect the file and delete it according to your retention policy.
+
+### Optional ICMP Echo Samples
+
+Connection summaries and protocol details work without payload inspection. `--inspect-payloads` enables sanitized ICMP Echo samples in the details view. Samples stay in memory: at most 16 records per connection and 64 payload bytes per record. This feature does not write payload data to disk. It is disabled by default and requires this active acknowledgment comment in the config file:
 
 ```ini
 inspect_payloads = true
 ## User has acknowledged to behave ethically and inspect only authorized traffic.
 ```
 
-By default, the config is read from `$XDG_CONFIG_HOME/sniffit-ng/config`, or `~/.config/sniffit-ng/config` when `XDG_CONFIG_HOME` is unset. Pass `--config FILE` to use another file. The `--inspect-payloads` switch can enable inspection for one run, but an acknowledgment in the loaded config is still required. If inspection is enabled in config, it is active for that run without the switch. The program prints a reminder that inspection must be authorized and handled ethically. Missing acknowledgment fails closed. The shipped [`sniffit-ng.conf.example`](sniffit-ng.conf.example) keeps inspection disabled and its acknowledgment line commented out.
+The config is read from `$XDG_CONFIG_HOME/sniffit-ng/config` or `~/.config/sniffit-ng/config`. Use `--config FILE` to select another file. The `--inspect-payloads` option also requires the acknowledgment in the loaded config. Missing acknowledgment fails closed. The example config keeps inspection disabled and the acknowledgment commented out. This acknowledgment applies only to in-memory ICMP Echo samples; payload logging and pcap recording each require their own interactive acknowledgment.
 
-This persisted acknowledgment applies only to in-memory ICMP Echo display. Persistent payload logging remains a separate feature and still requires the interactive per-run acknowledgment described above.
+## Building
+
+Install a C17 compiler, CMake 3.16 or newer, pkg-config, and libpcap, ncursesw, and libcurl development files. From the project root, configure and build a release executable:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+```
+
+To run the tests after building:
+
+```sh
+ctest --test-dir build --output-on-failure
+```

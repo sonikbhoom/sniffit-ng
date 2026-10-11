@@ -93,6 +93,14 @@ The user has explicitly authorized development and testing of live capture again
 7. **Release/hardening:** GitHub Actions now runs the sanitizer suite and a Clang/libFuzzer parser smoke test on pushes and pull requests. Remaining: broaden malformed-pcap/fuzz corpora, extend capability testing across Linux environments, and decide licensing before inviting reuse/contributions. The initial milestone is already published. Never grant file capabilities to a developer-writable binary for deployment.
 8. **Protocol decoding roadmap:** Active bounded modules now decode TCP, packet-local HTTP, DNS over UDP/TCP, DHCPv4/BOOTP, generic UDP, NTP, SNMP, TLS records, QUIC headers, RTP/RTCP, Syslog, RADIUS, TACACS+, ICMP, IGMP, and VRRP. Remaining entries below require IPv6 or non-IP link parsing. Each decoder must use bounded spans, emit metadata by default, and have malformed/truncated fixtures. Keep credentials, community strings, keys, and arbitrary payload hidden by default.
 
+### Monitoring Experience TODO
+
+- Add quick filters for protocol, specific local or remote ports, and a selected connection. Clearly label the difference between hiding rows in the display and filtering packets at capture time.
+- Keep always-on monitoring practical: run multi-day soak tests for memory, CPU use, stale-flow expiry, and stable counters; document results before claiming long-term readiness.
+- Add an optional threat-priority sort that moves explainable heuristic signals to the top of the list, such as unexpected inbound SSH/Telnet or validated command-and-control indicators. Show why a connection was prioritized; treat it as a lead to review, not proof of an attack or a verdict.
+- Add direction colors: blue for outbound traffic, green when both directions are observed, and red for inbound traffic with no reply seen. Determine direction from the local host/interface, not endpoint sort order, and provide text cues for terminals without color.
+- Add a small set of real, compressed screenshots to the README. Keep image files modest so the documentation stays quick to download.
+
 ### Protocol Decoder Backlog
 
 The capture/parser foundation is currently Ethernet plus IPv4. Prioritize decoders that fit that foundation first, and treat IPv6 or other link types as explicit prerequisite work rather than pretending their packets are already supported.

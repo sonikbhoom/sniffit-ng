@@ -2,6 +2,9 @@
 
 #include "sniffit_ng/config.h"
 
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,6 +55,35 @@ static void test_payload_inspection_defaults_off(void)
     assert(sn_config_load_file(path, &config, error, sizeof(error)));
     assert(!config.inspect_payloads);
     assert(!config.payload_display_acknowledged);
+    assert(!config.resolve_external_addr);
+    assert(unlink(path) == 0);
+}
+
+static void test_external_address_lookup_is_opt_in(void)
+{
+    char path[80];
+    char error[256] = {0};
+    struct sn_app_config config;
+
+    write_config_file(path, "resolve_external_addr = true\n");
+    assert(sn_config_load_file(path, &config, error, sizeof(error)));
+    assert(config.resolve_external_addr);
+    assert(unlink(path) == 0);
+
+    write_config_file(path, "resolve_external_addr = false\n");
+    assert(sn_config_load_file(path, &config, error, sizeof(error)));
+    assert(!config.resolve_external_addr);
+    assert(unlink(path) == 0);
+
+    write_config_file(path, "resolve_external_addr = maybe\n");
+    assert(!sn_config_load_file(path, &config, error, sizeof(error)));
+    assert(strstr(error, "resolve_external_addr") != NULL);
+    assert(unlink(path) == 0);
+
+    write_config_file(path,
+                      "resolve_external_addr = false\n"
+                      "resolve_external_addr = true\n");
+    assert(!sn_config_load_file(path, &config, error, sizeof(error)));
     assert(unlink(path) == 0);
 }
 
@@ -78,6 +110,7 @@ int main(void)
 {
     test_payload_inspection_requires_recorded_ack();
     test_payload_inspection_defaults_off();
+    test_external_address_lookup_is_opt_in();
     test_unknown_duplicate_and_invalid_values_are_rejected();
     puts("config tests passed");
     return 0;

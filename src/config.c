@@ -68,6 +68,7 @@ bool sn_config_load_file(const char *path,
     char line[CONFIG_LINE_CAPACITY];
     size_t line_number = 0U;
     bool inspect_setting_seen = false;
+    bool external_address_setting_seen = false;
 
     if (path == NULL || path[0] == '\0' || config == NULL) {
         set_error(error_buffer, error_buffer_size, "invalid config path or output", 0U);
@@ -112,21 +113,35 @@ bool sn_config_load_file(const char *path,
         {
             char *key = trim(text);
             char *value = trim(equals + 1);
-            if (strcmp(key, "inspect_payloads") != 0 || inspect_setting_seen) {
-                fclose(stream);
-                set_error(error_buffer, error_buffer_size,
-                          "unknown or duplicate configuration key", line_number);
-                return false;
-            }
-            inspect_setting_seen = true;
-            if (strcmp(value, "true") == 0) {
-                config->inspect_payloads = true;
-            } else if (strcmp(value, "false") == 0) {
-                config->inspect_payloads = false;
+            if (strcmp(key, "inspect_payloads") == 0 && !inspect_setting_seen) {
+                inspect_setting_seen = true;
+                if (strcmp(value, "true") == 0) {
+                    config->inspect_payloads = true;
+                } else if (strcmp(value, "false") == 0) {
+                    config->inspect_payloads = false;
+                } else {
+                    fclose(stream);
+                    set_error(error_buffer, error_buffer_size,
+                              "inspect_payloads must be true or false", line_number);
+                    return false;
+                }
+            } else if (strcmp(key, "resolve_external_addr") == 0 &&
+                       !external_address_setting_seen) {
+                external_address_setting_seen = true;
+                if (strcmp(value, "true") == 0) {
+                    config->resolve_external_addr = true;
+                } else if (strcmp(value, "false") == 0) {
+                    config->resolve_external_addr = false;
+                } else {
+                    fclose(stream);
+                    set_error(error_buffer, error_buffer_size,
+                              "resolve_external_addr must be true or false", line_number);
+                    return false;
+                }
             } else {
                 fclose(stream);
                 set_error(error_buffer, error_buffer_size,
-                          "inspect_payloads must be true or false", line_number);
+                          "unknown or duplicate configuration key", line_number);
                 return false;
             }
         }

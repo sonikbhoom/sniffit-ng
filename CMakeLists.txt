@@ -11,6 +11,7 @@ include(CTest)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(PCAP REQUIRED IMPORTED_TARGET libpcap)
 pkg_check_modules(NCURSESW REQUIRED IMPORTED_TARGET ncursesw)
+pkg_check_modules(CURL REQUIRED IMPORTED_TARGET libcurl)
 option(SNIFFIT_NG_ENABLE_SANITIZERS "Build with AddressSanitizer and UBSan" OFF)
 option(SNIFFIT_NG_BUILD_PACKET_FUZZER "Build the Clang/libFuzzer Ethernet/SLL packet parser target" OFF)
 set(SNIFFIT_NG_CUSTOM_HTTP_DECODER_SOURCE "" CACHE FILEPATH
@@ -108,6 +109,11 @@ target_compile_definitions(sniffit_payload_log PRIVATE _DEFAULT_SOURCE)
 add_library(sniffit_privilege STATIC src/privilege.c)
 target_include_directories(sniffit_privilege PUBLIC include)
 
+add_library(sniffit_network_info STATIC src/network_info.c)
+target_include_directories(sniffit_network_info PUBLIC include)
+target_compile_definitions(sniffit_network_info PRIVATE _DEFAULT_SOURCE)
+target_link_libraries(sniffit_network_info PUBLIC PkgConfig::CURL)
+
 add_library(sniffit_config STATIC src/config.c)
 target_include_directories(sniffit_config PUBLIC include)
 
@@ -118,7 +124,8 @@ target_link_libraries(sniffit_ui PUBLIC sniffit_monitor PkgConfig::NCURSESW)
 
 add_executable(sniffit-ng src/main.c)
 target_link_libraries(sniffit-ng PRIVATE
-    sniffit_ui sniffit_payload_log sniffit_pcap_writer sniffit_privilege sniffit_config
+    sniffit_ui sniffit_payload_log sniffit_pcap_writer sniffit_privilege
+    sniffit_network_info sniffit_config
 )
 
 install(TARGETS sniffit-ng
@@ -154,6 +161,9 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
         -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
     )
     target_compile_options(sniffit_privilege PRIVATE
+        -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+    )
+    target_compile_options(sniffit_network_info PRIVATE
         -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
     )
     target_compile_options(sniffit_config PRIVATE
@@ -312,6 +322,15 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME config_validation COMMAND test_config)
 
+    add_executable(test_network_info tests/test_network_info.c)
+    target_link_libraries(test_network_info PRIVATE sniffit_network_info)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(test_network_info PRIVATE
+            -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+        )
+    endif()
+    add_test(NAME network_info COMMAND test_network_info)
+
     add_executable(test_icmp_payload_view
         tests/test_icmp_payload_view.c src/icmp_payload_view.c
     )
@@ -325,7 +344,7 @@ if(BUILD_TESTING)
 endif()
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND SNIFFIT_NG_ENABLE_SANITIZERS)
-    foreach(target sniffit_packet sniffit_decode sniffit_flow sniffit_capture sniffit_pcap_writer sniffit_monitor sniffit_payload_log sniffit_privilege sniffit_config sniffit_ui sniffit-ng test_ui_window test_ui_pty test_config test_icmp_payload_view test_pcap_writer)
+    foreach(target sniffit_packet sniffit_decode sniffit_flow sniffit_capture sniffit_pcap_writer sniffit_monitor sniffit_payload_log sniffit_privilege sniffit_network_info sniffit_config sniffit_ui sniffit-ng test_ui_window test_ui_pty test_config test_network_info test_icmp_payload_view test_pcap_writer)
         target_compile_options(${target} PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
         target_link_options(${target} PUBLIC -fsanitize=address,undefined)
     endforeach()
@@ -351,7 +370,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Sniffit NG maintainers")
     set(CPACK_DEBIAN_PACKAGE_SECTION "net")
     set(CPACK_DEBIAN_PACKAGE_DEPENDS
-        "libc6, libncursesw6, libtinfo6, libpcap0.8 | libpcap0.8t64")
+        "libc6, libncursesw6, libtinfo6, libpcap0.8 | libpcap0.8t64, libcurl4 | libcurl4t64")
     set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 else()
     set(CPACK_GENERATOR "TGZ")

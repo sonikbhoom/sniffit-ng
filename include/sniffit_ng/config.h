@@ -10,6 +10,7 @@
 struct sn_app_config {
     bool inspect_payloads;
     bool payload_display_acknowledged;
+    bool resolve_external_addr;
 };
 
 void sn_config_init(struct sn_app_config *config);
