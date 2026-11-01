@@ -290,6 +290,7 @@ int main(void)
         int result = sn_ui_run(&monitor, &network_info, false, false,
                        priority_ports,
                        sizeof(priority_ports) / sizeof(priority_ports[0]),
+                       NULL, 0U,
                        inject_new_flow, &poll_context);
         sn_monitor_destroy(&monitor);
         _exit(result);
@@ -299,7 +300,7 @@ int main(void)
     assert(read_until(master_fd, output, sizeof(output), &output_length,
                       "ppp0 ", 1000));
     assert(read_until(master_fd, output, sizeof(output), &output_length,
-                      "FULL TELNET HEX", 1000));
+                      "FULL DECODE", 1000));
     assert(read_until(master_fd, output, sizeof(output), &output_length,
                       "192.168.1.7", 1000));
     assert(strstr(output, "external 203.0.113.7") != NULL);

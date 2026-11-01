@@ -3,6 +3,7 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 #define CONFIG_LINE_CAPACITY 512U
 
@@ -108,6 +109,59 @@ static bool parse_ui_priority(char *value, struct sn_app_config *config)
     }
 }
 
+bool sn_config_protocol_from_name(const char *name, uint8_t *protocol)
+{
+    static const struct {
+        const char *name;
+        uint8_t number;
+    } options[] = {
+        {"tcp", 6U}, {"udp", 17U}, {"icmp", 1U}, {"igmp", 2U}, {"vrrp", 112U}
+    };
+
+    if (name == NULL || protocol == NULL) {
+        return false;
+    }
+    for (size_t index = 0U; index < sizeof(options) / sizeof(options[0]); ++index) {
+        if (strcasecmp(name, options[index].name) == 0) {
+            *protocol = options[index].number;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool parse_hide_protocol(char *value, struct sn_app_config *config)
+{
+    char *entry = value;
+
+    config->hide_protocol_count = 0U;
+    if (entry[0] == '\0') {
+        return true;
+    }
+    for (;;) {
+        char *comma = strchr(entry, ',');
+        uint8_t protocol;
+
+        if (comma != NULL) {
+            *comma = '\0';
+        }
+        if (!sn_config_protocol_from_name(trim(entry), &protocol) ||
+            config->hide_protocol_count >= SN_CONFIG_HIDE_PROTOCOL_CAPACITY) {
+            return false;
+        }
+        for (size_t index = 0U; index < config->hide_protocol_count; ++index) {
+            if (config->hide_protocols[index] == protocol) {
+                return false;
+            }
+        }
+        config->hide_protocols[config->hide_protocol_count++] = protocol;
+        if (comma == NULL) {
+            return true;
+        }
+        entry = comma + 1;
+    }
+}
+
 void sn_config_init(struct sn_app_config *config)
 {
     if (config != NULL) {
@@ -117,6 +171,8 @@ void sn_config_init(struct sn_app_config *config)
         config->ui_priority_ports[1] =
             (struct sn_ui_priority_port){.protocol = 6U, .port = 23U};
         config->ui_priority_count = 2U;
+        config->hide_protocols[0] = 1U;
+        config->hide_protocol_count = 1U;
     }
 }
 
@@ -160,6 +216,7 @@ bool sn_config_load_file(const char *path,
     bool raw_flows_setting_seen = false;
     bool tainted_extensions_setting_seen = false;
     bool ui_priority_setting_seen = false;
+    bool hide_protocol_setting_seen = false;
     bool decoder_setting_seen[SN_DECODER_MODULE_COUNT] = {false};
 
     if (path == NULL || path[0] == '\0' || config == NULL) {
@@ -280,6 +337,16 @@ bool sn_config_load_file(const char *path,
                     fclose(stream);
                     set_error(error_buffer, error_buffer_size,
                               "ui_priority must contain unique PORT/tcp or PORT/udp entries",
+                              line_number);
+                    return false;
+                }
+            } else if (strcmp(key, "hide_protocol") == 0 &&
+                       !hide_protocol_setting_seen) {
+                hide_protocol_setting_seen = true;
+                if (!parse_hide_protocol(value, config)) {
+                    fclose(stream);
+                    set_error(error_buffer, error_buffer_size,
+                              "hide_protocol must list unique protocols from tcp, udp, icmp, igmp, vrrp",
                               line_number);
                     return false;
                 }

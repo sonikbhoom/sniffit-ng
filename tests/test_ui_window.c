@@ -70,6 +70,32 @@ static void test_service_hints_are_protocol_specific(void)
     assert(sn_ui_port_service_name(1U, 80U) == NULL);
 }
 
+static void test_hidden_protocols_yield_to_explicit_selection(void)
+{
+    struct sn_flow icmp = {.protocol = 1U};
+    struct sn_flow tcp = {.protocol = 6U};
+    struct sn_flow other = {.protocol = 47U};
+    struct sn_ui_flow_filter filter = {
+        .hidden_protocols = {1U},
+        .hidden_protocol_count = 1U
+    };
+
+    assert(!sn_ui_flow_matches(&icmp, &filter));
+    assert(sn_ui_flow_matches(&tcp, &filter));
+    assert(sn_ui_flow_matches(&other, &filter));
+
+    filter.protocol_enabled = true;
+    filter.protocol = 1U;
+    assert(sn_ui_flow_matches(&icmp, &filter));
+    assert(!sn_ui_flow_matches(&tcp, &filter));
+
+    filter.protocol_enabled = false;
+    filter.show_all_protocols = true;
+    assert(sn_ui_flow_matches(&icmp, &filter));
+    assert(sn_ui_flow_matches(&tcp, &filter));
+    assert(sn_ui_flow_matches(&other, &filter));
+}
+
 static void test_flow_filter_direction_semantics(void)
 {
     struct sn_flow flow = {0};
@@ -191,6 +217,7 @@ int main(void)
     test_flow_order_is_deterministic();
     test_service_hints_are_protocol_specific();
     test_flow_filter_direction_semantics();
+    test_hidden_protocols_yield_to_explicit_selection();
     test_configured_priority_flows_are_red_and_sorted_by_volume();
     test_detail_navigation_and_dismissal();
     puts("ui window tests passed");

@@ -187,8 +187,17 @@ bool sn_ui_flow_matches(const struct sn_flow *flow,
     if (flow == NULL || filter == NULL) {
         return false;
     }
-    if (filter->protocol_enabled && flow->protocol != filter->protocol) {
-        return false;
+    if (filter->protocol_enabled) {
+        if (flow->protocol != filter->protocol) {
+            return false;
+        }
+    } else if (!filter->show_all_protocols) {
+        for (size_t index = 0U; index < filter->hidden_protocol_count &&
+                                index < SN_CONFIG_HIDE_PROTOCOL_CAPACITY; ++index) {
+            if (flow->protocol == filter->hidden_protocols[index]) {
+                return false;
+            }
+        }
     }
     for (size_t source = 0U; source < 2U; ++source) {
         size_t destination = 1U - source;

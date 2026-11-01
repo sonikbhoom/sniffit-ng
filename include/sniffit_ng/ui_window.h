@@ -18,6 +18,10 @@ struct sn_ui_flow_filter {
     uint16_t source_port;
     uint16_t destination_port;
     uint8_t protocol;
+    /* Hidden from the default view; a protocol filter or show_all_protocols overrides this. */
+    bool show_all_protocols;
+    uint8_t hidden_protocols[SN_CONFIG_HIDE_PROTOCOL_CAPACITY];
+    size_t hidden_protocol_count;
 };
 
 size_t sn_ui_window_start(size_t item_count,

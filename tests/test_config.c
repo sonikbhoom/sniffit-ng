@@ -245,8 +245,46 @@ static void test_unknown_duplicate_and_invalid_values_are_rejected(void)
     assert(unlink(path) == 0);
 }
 
+static void test_hide_protocol_defaults_and_parsing(void)
+{
+    char path[80];
+    char error[256] = {0};
+    struct sn_app_config config;
+
+    sn_config_init(&config);
+    assert(config.hide_protocol_count == 1U && config.hide_protocols[0] == 1U);
+
+    write_config_file(path, "inspect_payloads = false\n");
+    assert(sn_config_load_file(path, &config, error, sizeof(error)));
+    assert(config.hide_protocol_count == 1U && config.hide_protocols[0] == 1U);
+    assert(unlink(path) == 0);
+
+    write_config_file(path, "hide_protocol = icmp, IGMP,vrrp\n");
+    assert(sn_config_load_file(path, &config, error, sizeof(error)));
+    assert(config.hide_protocol_count == 3U);
+    assert(config.hide_protocols[0] == 1U && config.hide_protocols[1] == 2U &&
+           config.hide_protocols[2] == 112U);
+    assert(unlink(path) == 0);
+
+    write_config_file(path, "hide_protocol =\n");
+    assert(sn_config_load_file(path, &config, error, sizeof(error)));
+    assert(config.hide_protocol_count == 0U);
+    assert(unlink(path) == 0);
+
+    static const char *const invalid[] = {
+        "hide_protocol = gre\n", "hide_protocol = icmp,icmp\n",
+        "hide_protocol = icmp,\n", "hide_protocol = icmp\nhide_protocol = udp\n"
+    };
+    for (size_t index = 0U; index < sizeof(invalid) / sizeof(invalid[0]); ++index) {
+        write_config_file(path, invalid[index]);
+        assert(!sn_config_load_file(path, &config, error, sizeof(error)));
+        assert(unlink(path) == 0);
+    }
+}
+
 int main(void)
 {
+    test_hide_protocol_defaults_and_parsing();
     test_payload_inspection_requires_recorded_ack();
     test_payload_inspection_defaults_off();
     test_full_decode_requires_specific_ack();

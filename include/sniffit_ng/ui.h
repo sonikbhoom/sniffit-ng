@@ -22,6 +22,8 @@ int sn_ui_run(struct sn_monitor *monitor,
 		bool payload_inspection_active,
 		const struct sn_ui_priority_port *priority_ports,
 		size_t priority_count,
+		const uint8_t *hidden_protocols,
+		size_t hidden_count,
 		sn_ui_poll_callback poll_capture,
 		void *poll_context);
 

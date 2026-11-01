@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #define SN_CONFIG_UI_PRIORITY_CAPACITY 32U
+#define SN_CONFIG_HIDE_PROTOCOL_CAPACITY 5U
 
 struct sn_ui_priority_port {
     uint8_t protocol;
@@ -29,8 +30,13 @@ struct sn_app_config {
     bool tainted_extensions;
     struct sn_ui_priority_port ui_priority_ports[SN_CONFIG_UI_PRIORITY_CAPACITY];
     size_t ui_priority_count;
+    uint8_t hide_protocols[SN_CONFIG_HIDE_PROTOCOL_CAPACITY];
+    size_t hide_protocol_count;
     enum sn_decoder_mode decoder_modes[SN_DECODER_MODULE_COUNT];
 };
+
+/* Case-insensitive lookup of the IP protocols the UI can list: tcp, udp, icmp, igmp, vrrp. */
+bool sn_config_protocol_from_name(const char *name, uint8_t *protocol);
 
 void sn_config_init(struct sn_app_config *config);
 

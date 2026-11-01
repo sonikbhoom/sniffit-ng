@@ -202,6 +202,8 @@ static int replay_pcap(const char *path,
                            SN_DECODER_MODULE_COUNT],
                        const struct sn_ui_priority_port *priority_ports,
                        size_t priority_count,
+                       const uint8_t *hidden_protocols,
+                       size_t hidden_count,
                        const char *payload_log_path,
                        const char *pcap_output_path)
 {
@@ -298,6 +300,7 @@ static int replay_pcap(const char *path,
                        payload_logging_enabled || pcap_recording_enabled,
                        payload_inspection_enabled,
                        priority_ports, priority_count,
+                       hidden_protocols, hidden_count,
                        NULL, NULL);
     sn_monitor_destroy(&monitor);
     return status;
@@ -314,6 +317,8 @@ static int run_live_capture(const char *device,
                                 SN_DECODER_MODULE_COUNT],
                             const struct sn_ui_priority_port *priority_ports,
                             size_t priority_count,
+                            const uint8_t *hidden_protocols,
+                            size_t hidden_count,
                             bool resolve_external_addr,
                             const char *payload_log_path,
                             const char *pcap_output_path)
@@ -406,6 +411,7 @@ static int run_live_capture(const char *device,
                           payload_logging_enabled || pcap_writer != NULL,
                           payload_inspection_enabled,
                           priority_ports, priority_count,
+                          hidden_protocols, hidden_count,
                           poll_live_capture, &live);
 
     sn_monitor_destroy(&monitor);
@@ -532,6 +538,7 @@ int main(int argc, char **argv)
                            config.show_raw_flows,
                            config.tainted_extensions, config.decoder_modes,
                            config.ui_priority_ports, config.ui_priority_count,
+                           config.hide_protocols, config.hide_protocol_count,
                            payload_log_path,
                            pcap_output_path);
     }
@@ -541,6 +548,7 @@ int main(int argc, char **argv)
                             config.show_raw_flows, config.tainted_extensions,
                             config.decoder_modes,
                             config.ui_priority_ports, config.ui_priority_count,
+                            config.hide_protocols, config.hide_protocol_count,
                             config.resolve_external_addr,
                             payload_log_path, pcap_output_path);
 }

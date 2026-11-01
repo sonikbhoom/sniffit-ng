@@ -137,7 +137,7 @@ target_link_libraries(sniffit_config PUBLIC sniffit_decoder_modes)
 add_library(sniffit_ui STATIC src/ui.c)
 target_include_directories(sniffit_ui PUBLIC include)
 target_sources(sniffit_ui PRIVATE src/ui_window.c src/icmp_payload_view.c)
-target_link_libraries(sniffit_ui PUBLIC sniffit_monitor PkgConfig::NCURSESW)
+target_link_libraries(sniffit_ui PUBLIC sniffit_monitor sniffit_config PkgConfig::NCURSESW)
 
 add_executable(sniffit-ng src/main.c)
 target_link_libraries(sniffit-ng PRIVATE

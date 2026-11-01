@@ -119,8 +119,22 @@ static void draw_filter_line(const struct sn_ui_flow_filter *filter)
 {
     char source[INET_ADDRSTRLEN] = "All";
     char destination[INET_ADDRSTRLEN] = "All";
-    const char *protocol = filter->protocol_enabled ?
-        protocol_name(filter->protocol) : "All";
+    char protocol[48] = "All";
+
+    if (filter->protocol_enabled) {
+        (void)snprintf(protocol, sizeof(protocol), "%s", protocol_name(filter->protocol));
+    } else if (filter->hidden_protocol_count > 0U && !filter->show_all_protocols) {
+        size_t used = (size_t)snprintf(protocol, sizeof(protocol), "All (hiding");
+        for (size_t index = 0U; index < filter->hidden_protocol_count &&
+                                used < sizeof(protocol); ++index) {
+            used += (size_t)snprintf(protocol + used, sizeof(protocol) - used, " %s",
+                                     protocol_name(filter->hidden_protocols[index]));
+        }
+        if (used < sizeof(protocol) - 1U) {
+            protocol[used] = ')';
+            protocol[used + 1U] = '\0';
+        }
+    }
 
     if (filter->source_ip_enabled) {
         (void)inet_ntop(AF_INET, filter->source_ip, source, sizeof(source));
@@ -415,28 +429,12 @@ static void set_port_filter(const char *prompt, bool *enabled, uint16_t *port,
 
 static bool parse_protocol_filter(const char *input, uint8_t *protocol)
 {
-    static const struct {
-        const char *name;
-        uint8_t number;
-    } options[] = {
-        {"tcp", 6U},
-        {"udp", 17U},
-        {"icmp", 1U},
-        {"igmp", 2U},
-        {"vrrp", 112U}
-    };
-
-    for (size_t index = 0U; index < sizeof(options) / sizeof(options[0]); ++index) {
-        if (strcasecmp(input, options[index].name) == 0) {
-            *protocol = options[index].number;
-            return true;
-        }
-    }
-    return false;
+    return sn_config_protocol_from_name(input, protocol);
 }
 
 static void set_protocol_filter(const char *prompt, bool *enabled,
-                                uint8_t *protocol, int input_timeout_ms)
+                                bool *show_all, uint8_t *protocol,
+                                int input_timeout_ms)
 {
     char input[32] = {0};
 
@@ -445,8 +443,10 @@ static void set_protocol_filter(const char *prompt, bool *enabled,
     }
     if (input[0] == '\0' || strcasecmp(input, "all") == 0) {
         *enabled = false;
+        *show_all = true;
     } else if (parse_protocol_filter(input, protocol)) {
         *enabled = true;
+        *show_all = false;
     }
 }
 
@@ -1411,10 +1411,13 @@ int sn_ui_run(struct sn_monitor *monitor,
               bool payload_inspection_active,
               const struct sn_ui_priority_port *priority_ports,
               size_t priority_count,
+              const uint8_t *hidden_protocols,
+              size_t hidden_count,
               sn_ui_poll_callback poll_capture,
               void *poll_context)
 {
     struct sn_ui_flow_filter filter = {0};
+    struct sn_ui_flow_filter default_filter;
     const struct sn_flow *flows[SN_FLOW_TABLE_CAPACITY];
     size_t selected = 0U;
     size_t scroll_start = 0U;
@@ -1430,6 +1433,11 @@ int sn_ui_run(struct sn_monitor *monitor,
     if (monitor == NULL || initscr() == NULL) {
         return 1;
     }
+    for (size_t index = 0U; hidden_protocols != NULL && index < hidden_count &&
+                            index < SN_CONFIG_HIDE_PROTOCOL_CAPACITY; ++index) {
+        filter.hidden_protocols[filter.hidden_protocol_count++] = hidden_protocols[index];
+    }
+    default_filter = filter;
     cbreak();
     noecho();
     keypad(stdscr, true);
@@ -1509,7 +1517,7 @@ int sn_ui_run(struct sn_monitor *monitor,
         case 'r':
         case 'R':
             reset_monitor(monitor);
-            filter = (struct sn_ui_flow_filter){0};
+            filter = default_filter;
             sn_monitor_rate_sampler_init(&rate_sampler);
             rates = (struct sn_monitor_rates){0};
             rates_ready = false;
@@ -1557,7 +1565,8 @@ int sn_ui_run(struct sn_monitor *monitor,
         case '5':
         case KEY_F(5):
             set_protocol_filter("Protocol (tcp, udp, icmp, igmp, vrrp or all): ",
-                                &filter.protocol_enabled, &filter.protocol,
+                                &filter.protocol_enabled, &filter.show_all_protocols,
+                                &filter.protocol,
                                 capture_polling ? 50 : -1);
             selected = 0U;
             scroll_start = 0U;

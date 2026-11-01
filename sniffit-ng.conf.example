@@ -19,6 +19,12 @@ show_raw_flows = false
 # Priority matches are always red and sorted first, then by total observed bytes.
 ui_priority = 22/tcp,23/tcp
 
+# Protocols hidden from the default flow list. They remain available by
+# selecting them (or "all") with the protocol filter (key 5). Comma-separated; supported
+# values are tcp, udp, icmp, igmp, vrrp. Use "hide_protocol =" to hide nothing.
+# Traffic of any other protocol is always listed.
+hide_protocol = icmp
+
 # Enable statically linked researcher-supplied protocol extensions.
 # Compiled extension code is trusted executable code and is not sandboxed.
 tainted_extensions = false
