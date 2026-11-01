@@ -9,6 +9,7 @@
 
 #define SN_CONFIG_UI_PRIORITY_CAPACITY 32U
 #define SN_CONFIG_HIDE_PROTOCOL_CAPACITY 5U
+#define SN_PRIORITY_LOG_PATH_CAPACITY 512U
 
 struct sn_ui_priority_port {
     uint8_t protocol;
@@ -32,6 +33,7 @@ struct sn_app_config {
     size_t ui_priority_count;
     uint8_t hide_protocols[SN_CONFIG_HIDE_PROTOCOL_CAPACITY];
     size_t hide_protocol_count;
+    char priority_log_path[SN_PRIORITY_LOG_PATH_CAPACITY];
     enum sn_decoder_mode decoder_modes[SN_DECODER_MODULE_COUNT];
 };
 

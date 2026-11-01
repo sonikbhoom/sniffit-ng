@@ -122,6 +122,11 @@ target_include_directories(sniffit_payload_log PUBLIC include)
 target_link_libraries(sniffit_payload_log PUBLIC sniffit_packet)
 target_compile_definitions(sniffit_payload_log PRIVATE _DEFAULT_SOURCE)
 
+add_library(sniffit_priority_log STATIC src/priority_log.c)
+target_include_directories(sniffit_priority_log PUBLIC include)
+target_link_libraries(sniffit_priority_log PUBLIC sniffit_packet sniffit_config)
+target_compile_definitions(sniffit_priority_log PRIVATE _DEFAULT_SOURCE)
+
 add_library(sniffit_privilege STATIC src/privilege.c)
 target_include_directories(sniffit_privilege PUBLIC include)
 
@@ -141,7 +146,7 @@ target_link_libraries(sniffit_ui PUBLIC sniffit_monitor sniffit_config PkgConfig
 
 add_executable(sniffit-ng src/main.c)
 target_link_libraries(sniffit-ng PRIVATE
-    sniffit_ui sniffit_payload_log sniffit_pcap_writer sniffit_privilege
+    sniffit_ui sniffit_payload_log sniffit_priority_log sniffit_pcap_writer sniffit_privilege
     sniffit_network_info sniffit_config sniffit_inspect
 )
 
@@ -181,6 +186,9 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
         -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
     )
     target_compile_options(sniffit_payload_log PRIVATE
+        -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+    )
+    target_compile_options(sniffit_priority_log PRIVATE
         -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
     )
     target_compile_options(sniffit_privilege PRIVATE
@@ -316,6 +324,21 @@ if(BUILD_TESTING)
         COMMAND sniffit-ng --write-pcap ${CMAKE_CURRENT_BINARY_DIR}/unused-output.pcap)
     set_tests_properties(cli_write_pcap_requires_source PROPERTIES WILL_FAIL TRUE)
 
+    add_executable(test_priority_log tests/test_priority_log.c)
+    target_link_libraries(test_priority_log PRIVATE sniffit_priority_log)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(test_priority_log PRIVATE
+            -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+        )
+    endif()
+    add_test(NAME priority_log COMMAND test_priority_log)
+
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME scanmap_tool
+            COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_CURRENT_SOURCE_DIR}/tests/scanmap -v)
+    endif()
+
     add_executable(test_ui_window tests/test_ui_window.c src/ui_window.c)
     target_include_directories(test_ui_window PRIVATE include)
     if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
@@ -378,7 +401,7 @@ if(BUILD_TESTING AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND SNIFFIT_NG_ENABLE_SANITIZERS)
-    foreach(target sniffit_packet sniffit_decoder_modes sniffit_decode sniffit_flow sniffit_capture sniffit_pcap_writer sniffit_monitor sniffit_payload_log sniffit_privilege sniffit_network_info sniffit_config sniffit_ui sniffit-ng test_ui_window test_ui_pty test_config test_network_info test_icmp_payload_view test_pcap_writer)
+    foreach(target sniffit_packet sniffit_decoder_modes sniffit_decode sniffit_flow sniffit_capture sniffit_pcap_writer sniffit_monitor sniffit_payload_log sniffit_priority_log sniffit_privilege sniffit_network_info sniffit_config sniffit_ui sniffit-ng test_priority_log test_ui_window test_ui_pty test_config test_network_info test_icmp_payload_view test_pcap_writer)
         target_compile_options(${target} PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
         target_link_options(${target} PUBLIC -fsanitize=address,undefined)
     endforeach()

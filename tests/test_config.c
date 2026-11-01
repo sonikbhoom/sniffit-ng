@@ -282,8 +282,37 @@ static void test_hide_protocol_defaults_and_parsing(void)
     }
 }
 
+static void test_priority_log_path(void)
+{
+    char path[80];
+    char error[256] = {0};
+    struct sn_app_config config;
+
+    sn_config_init(&config);
+    assert(config.priority_log_path[0] == '\0');
+
+    write_config_file(path, "priority_log = /var/tmp/sniffit-priority.jsonl\n");
+    assert(sn_config_load_file(path, &config, error, sizeof(error)));
+    assert(strcmp(config.priority_log_path, "/var/tmp/sniffit-priority.jsonl") == 0);
+    assert(unlink(path) == 0);
+
+    write_config_file(path, "priority_log =\n");
+    assert(sn_config_load_file(path, &config, error, sizeof(error)));
+    assert(config.priority_log_path[0] == '\0');
+    assert(unlink(path) == 0);
+
+    write_config_file(path, "priority_log = relative.jsonl\n");
+    assert(!sn_config_load_file(path, &config, error, sizeof(error)));
+    assert(unlink(path) == 0);
+
+    write_config_file(path, "priority_log = /a\npriority_log = /b\n");
+    assert(!sn_config_load_file(path, &config, error, sizeof(error)));
+    assert(unlink(path) == 0);
+}
+
 int main(void)
 {
+    test_priority_log_path();
     test_hide_protocol_defaults_and_parsing();
     test_payload_inspection_requires_recorded_ack();
     test_payload_inspection_defaults_off();

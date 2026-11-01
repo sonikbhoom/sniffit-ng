@@ -143,6 +143,16 @@ Set `ui_priority` to a comma-separated list of protocol-qualified ports, for exa
 
 Set `hide_protocol` to a comma-separated list of `tcp`, `udp`, `icmp`, `igmp` and `vrrp` to leave those protocols out of the default flow list, for example `hide_protocol = icmp,igmp`. It defaults to `icmp` because ICMP flows consume a lot of terminal space. Hidden protocols are still captured and counted, and selecting one with the protocol filter shows it; choosing `all` shows every protocol, including hidden ones; `r` (reset) restores the configured hiding. Traffic of any other protocol is never hidden. Set `hide_protocol =` to hide nothing.
 
+### Priority-port log and scan map
+
+Set `priority_log = /absolute/path.jsonl` to append one JSON line for every TCP/UDP packet (first fragment, IPv4) sent by a remote host to a local `ui_priority` port. It is off by default, and is also written in replay mode (without address filtering). The file is created owner-only (0600), symlinks and files with group/other access are rejected, and a write failure stops capture. Each packet is logged, so busy sessions produce large files. Example line:
+
+```
+{"ts":"2026-11-01T21:12:05.959Z","proto":"tcp","src":"203.0.113.9","sport":40000,"dst":"192.0.2.10","dport":22,"flags":"S","len":40}
+```
+
+Timestamps are ISO 8601 UTC. Analyze the log offline with `scripts/sniffit-ng-scanmap.py LOG... -o map.geojson` (Python 3 standard library only). It groups sources, labels them `probe` or `sustained` (`--sustained-packets`), and writes GeoJSON. By default it makes no network requests. `--lookup rdap|ipwhois|all` sends public source IPs to rdap.org and ipwho.is after a confirmation (`--yes` to skip), with caching, rate limiting and `--max-lookups`. Source addresses can be spoofed, and geolocation is approximate.
+
 ### Decoder Modes and Extensions
 
 `show_raw_flows = true` adds bounded IPv4 metadata flows for protocols without a built-in summary; it does not display packet bytes. Decoder keys accept `simplified` or `raw` for the currently dispatched modules: `icmp`, `igmp`, `tcp`, `http`, `telnet`, `ssh`, `dns`, `tls`, `tacacs`, `syslog`, `udp`, `dhcp4`, `snmp`, `ntp`, `quic`, `rtp`, `rtcp`, `radius`, and `vrrp`. Modes default to `simplified` and are selected at runtime through config. For TCP/22, `ssh = raw` displays validated IPv4 and TCP header bytes as hex in flow details, including options; it does not retain or display payload bytes, decode SSH messages, or decrypt traffic. Header records use the existing bounded per-flow decode history. Researcher-supplied HTTP and protocol extensions are included at build time and require `tainted_extensions = true` for every protocol; this is explicit opt-in, not sandboxing. `show_raw_flows` and built-in summaries do not require taint opt-in. When a recognized service has a cleartext or unauthenticated risk, the flow detail pane presents a bounded security advisory separately from decoded protocol summaries. Examples include HTTP, DNS, Telnet, NTP, ICMP, SNMPv1/v2c, and RADIUS. Advisories describe protocol or service risks, not the security of every deployment.

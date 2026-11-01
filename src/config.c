@@ -217,6 +217,7 @@ bool sn_config_load_file(const char *path,
     bool tainted_extensions_setting_seen = false;
     bool ui_priority_setting_seen = false;
     bool hide_protocol_setting_seen = false;
+    bool priority_log_setting_seen = false;
     bool decoder_setting_seen[SN_DECODER_MODULE_COUNT] = {false};
 
     if (path == NULL || path[0] == '\0' || config == NULL) {
@@ -340,6 +341,19 @@ bool sn_config_load_file(const char *path,
                               line_number);
                     return false;
                 }
+            } else if (strcmp(key, "priority_log") == 0 &&
+                       !priority_log_setting_seen) {
+                priority_log_setting_seen = true;
+                if (value[0] != '\0' &&
+                    (value[0] != '/' || strlen(value) >= SN_PRIORITY_LOG_PATH_CAPACITY)) {
+                    fclose(stream);
+                    set_error(error_buffer, error_buffer_size,
+                              "priority_log must be empty or an absolute path",
+                              line_number);
+                    return false;
+                }
+                (void)snprintf(config->priority_log_path,
+                               sizeof(config->priority_log_path), "%s", value);
             } else if (strcmp(key, "hide_protocol") == 0 &&
                        !hide_protocol_setting_seen) {
                 hide_protocol_setting_seen = true;

@@ -55,3 +55,7 @@ There is no separate lint target or lint workflow. GCC and Clang builds enable `
 - Config parsing is intentionally strict. New options should be validated, reject malformed values and duplicate settings consistently, and preserve fail-closed acknowledgment checks for sensitive features.
 - Follow the existing C interface pattern: public declarations in `include/sniffit_ng/`, `sn_`-prefixed APIs, matching implementation modules in `src/`, and focused CTest executables registered in `CMakeLists.txt`.
 - Use the README's authorization and privacy boundaries when changing capture, payload inspection, decoder extensions, or recording behavior. In particular, keep inspection/recording disabled unless explicitly opted into and acknowledged.
+
+## Priority-port log
+
+`src/priority_log.c` writes JSONL for inbound packets to `ui_priority` ports when `priority_log` (absolute path, off by default) is set; `main.c` wires it into `poll_live_capture` and `replay_pcap`. The file is opened 0600 with `O_NOFOLLOW` and a write failure stops capture. `scripts/sniffit-ng-scanmap.py` is the offline analyzer; its tests (`tests/scanmap`, ctest `scanmap_tool`) must never touch the network.

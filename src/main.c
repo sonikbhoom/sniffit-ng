@@ -4,6 +4,7 @@
 #include "sniffit_ng/packet_inspect.h"
 #include "sniffit_ng/pcap_writer.h"
 #include "sniffit_ng/payload_log.h"
+#include "sniffit_ng/priority_log.h"
 #include "sniffit_ng/privilege.h"
 #include "sniffit_ng/ui.h"
 
@@ -109,6 +110,7 @@ struct live_context {
     struct sn_capture *capture;
     struct sn_monitor *monitor;
     struct sn_payload_log *payload_log;
+    struct sn_priority_log *priority_log;
     struct sn_pcap_writer *pcap_writer;
     char error[256];
 };
@@ -161,6 +163,14 @@ static enum sn_ui_poll_result poll_live_capture(void *context,
             }
             return SN_UI_POLL_STOPPED;
         }
+        if (!sn_priority_log_observe(live->priority_log, &packet)) {
+            (void)snprintf(live->error, sizeof(live->error),
+                           "Capture stopped: priority log write failed");
+            if (status != NULL) {
+                *status = live->error;
+            }
+            return SN_UI_POLL_STOPPED;
+        }
         if (live->pcap_writer != NULL &&
             !sn_pcap_writer_write(live->pcap_writer, &packet)) {
             (void)snprintf(live->error, sizeof(live->error),
@@ -204,6 +214,7 @@ static int replay_pcap(const char *path,
                        size_t priority_count,
                        const uint8_t *hidden_protocols,
                        size_t hidden_count,
+                       const char *priority_log_path,
                        const char *payload_log_path,
                        const char *pcap_output_path)
 {
@@ -211,6 +222,7 @@ static int replay_pcap(const char *path,
     struct sn_capture_packet packet;
     struct sn_capture *capture;
     struct sn_payload_log *payload_log = NULL;
+    struct sn_priority_log *priority_log = NULL;
     struct sn_pcap_writer *pcap_writer = NULL;
     struct sn_monitor monitor;
     enum sn_packet_link_type link_type;
@@ -247,11 +259,25 @@ static int replay_pcap(const char *path,
             return 1;
         }
     }
+    if (priority_log_path != NULL && priority_log_path[0] != '\0' &&
+        priority_count > 0U) {
+        priority_log = sn_priority_log_open(priority_log_path, priority_ports,
+                                            priority_count, NULL,
+                                            error, sizeof(error));
+        if (priority_log == NULL) {
+            fprintf(stderr, "sniffit-ng: cannot open priority log: %s\n", error);
+            (void)sn_payload_log_close(payload_log);
+            (void)sn_pcap_writer_close(pcap_writer);
+            sn_capture_close(capture);
+            return 1;
+        }
+    }
 
     sn_monitor_init(&monitor, SN_FLOW_DEFAULT_IDLE_TIMEOUT_NS);
     if (!sn_monitor_set_full_decode(&monitor, full_decode_enabled)) {
         fprintf(stderr, "sniffit-ng: could not allocate full-decode history\n");
         sn_monitor_destroy(&monitor);
+        (void)sn_priority_log_close(priority_log);
         (void)sn_payload_log_close(payload_log);
         (void)sn_pcap_writer_close(pcap_writer);
         sn_capture_close(capture);
@@ -276,6 +302,11 @@ static int replay_pcap(const char *path,
             status = 1;
             break;
         }
+        if (!sn_priority_log_observe(priority_log, &packet)) {
+            fprintf(stderr, "sniffit-ng: failed writing priority log\n");
+            status = 1;
+            break;
+        }
         if (pcap_writer != NULL && !sn_pcap_writer_write(pcap_writer, &packet)) {
             fprintf(stderr, "sniffit-ng: failed writing pcap recording\n");
             status = 1;
@@ -290,6 +321,10 @@ static int replay_pcap(const char *path,
     }
     if (!sn_payload_log_close(payload_log)) {
         fprintf(stderr, "sniffit-ng: failed closing payload log\n");
+        status = 1;
+    }
+    if (!sn_priority_log_close(priority_log)) {
+        fprintf(stderr, "sniffit-ng: failed closing priority log\n");
         status = 1;
     }
     if (status != 0) {
@@ -319,6 +354,7 @@ static int run_live_capture(const char *device,
                             size_t priority_count,
                             const uint8_t *hidden_protocols,
                             size_t hidden_count,
+                            const char *priority_log_path,
                             bool resolve_external_addr,
                             const char *payload_log_path,
                             const char *pcap_output_path)
@@ -326,6 +362,7 @@ static int run_live_capture(const char *device,
     char error[256] = {0};
     struct sn_capture *capture;
     struct sn_payload_log *payload_log = NULL;
+    struct sn_priority_log *priority_log = NULL;
     struct sn_pcap_writer *pcap_writer = NULL;
     struct sn_monitor monitor;
     struct sn_network_info network_info;
@@ -378,12 +415,26 @@ static int run_live_capture(const char *device,
             return 1;
         }
     }
+    if (priority_log_path != NULL && priority_log_path[0] != '\0' &&
+        priority_count > 0U) {
+        priority_log = sn_priority_log_open(priority_log_path, priority_ports,
+                                            priority_count, network_info.local_ipv4,
+                                            error, sizeof(error));
+        if (priority_log == NULL) {
+            fprintf(stderr, "sniffit-ng: cannot open priority log after privilege drop: %s\n",
+                    error);
+            (void)sn_payload_log_close(payload_log);
+            sn_capture_close(capture);
+            return 1;
+        }
+    }
     if (pcap_output_path != NULL) {
         pcap_writer = sn_pcap_writer_open(pcap_output_path, link_type,
                                           error, sizeof(error));
         if (pcap_writer == NULL) {
             fprintf(stderr, "sniffit-ng: cannot open pcap recording after privilege drop: %s\n",
                     error);
+            (void)sn_priority_log_close(priority_log);
             (void)sn_payload_log_close(payload_log);
             sn_capture_close(capture);
             return 1;
@@ -396,6 +447,7 @@ static int run_live_capture(const char *device,
         sn_monitor_destroy(&monitor);
         sn_capture_close(capture);
         (void)sn_pcap_writer_close(pcap_writer);
+        (void)sn_priority_log_close(priority_log);
         (void)sn_payload_log_close(payload_log);
         return 1;
     }
@@ -405,6 +457,7 @@ static int run_live_capture(const char *device,
     live.capture = capture;
     live.monitor = &monitor;
     live.payload_log = payload_log;
+    live.priority_log = priority_log;
     live.pcap_writer = pcap_writer;
     live.error[0] = '\0';
     ui_result = sn_ui_run(&monitor, &network_info,
@@ -418,6 +471,12 @@ static int run_live_capture(const char *device,
     sn_capture_close(capture);
     if (!sn_pcap_writer_close(pcap_writer)) {
         fprintf(stderr, "sniffit-ng: failed closing pcap recording\n");
+        (void)sn_priority_log_close(priority_log);
+        (void)sn_payload_log_close(payload_log);
+        return 1;
+    }
+    if (!sn_priority_log_close(priority_log)) {
+        fprintf(stderr, "sniffit-ng: failed closing priority log\n");
         (void)sn_payload_log_close(payload_log);
         return 1;
     }
@@ -539,6 +598,7 @@ int main(int argc, char **argv)
                            config.tainted_extensions, config.decoder_modes,
                            config.ui_priority_ports, config.ui_priority_count,
                            config.hide_protocols, config.hide_protocol_count,
+                           config.priority_log_path,
                            payload_log_path,
                            pcap_output_path);
     }
@@ -549,6 +609,7 @@ int main(int argc, char **argv)
                             config.decoder_modes,
                             config.ui_priority_ports, config.ui_priority_count,
                             config.hide_protocols, config.hide_protocol_count,
+                            config.priority_log_path,
                             config.resolve_external_addr,
                             payload_log_path, pcap_output_path);
 }
