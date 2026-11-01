@@ -282,6 +282,72 @@ static void test_protocol_mode_selects_extension_or_simplified_decoder(void)
     assert(strstr(output, "SECURITY:") == NULL);
 }
 
+static void test_ssh_raw_mode_shows_headers_without_payload(void)
+{
+    uint8_t ipv4_packet[44U] = {0};
+    struct sn_packet_view packet = {0};
+    enum sn_decoder_mode modes[SN_DECODER_MODULE_COUNT] = {0};
+    char output[SN_PACKET_DECODE_TEXT_CAPACITY];
+
+    ipv4_packet[0] = 0x45U;
+    ipv4_packet[2] = 0U;
+    ipv4_packet[3] = (uint8_t)sizeof(ipv4_packet);
+    ipv4_packet[9] = 6U;
+    ipv4_packet[20] = 0x30U;
+    ipv4_packet[21] = 0x39U;
+    ipv4_packet[23] = 22U;
+    ipv4_packet[32] = 0x50U;
+    ipv4_packet[33] = 0x02U;
+    ipv4_packet[40] = 0xdeU;
+    ipv4_packet[41] = 0xadU;
+    ipv4_packet[42] = 0xbeU;
+    ipv4_packet[43] = 0xefU;
+    packet.protocol = 6U;
+    packet.transport_header_present = true;
+    packet.ipv4_packet = ipv4_packet;
+    packet.ipv4_packet_length = sizeof(ipv4_packet);
+    packet.ipv4_header_length = 20U;
+    packet.ipv4_total_length = sizeof(ipv4_packet);
+    packet.transport = ipv4_packet + 20U;
+    packet.transport_length = sizeof(ipv4_packet) - 20U;
+    packet.payload = ipv4_packet + 40U;
+    packet.payload_length = 4U;
+    modes[SN_DECODER_SSH] = SN_DECODER_RAW;
+
+    assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
+                                         false, false, modes));
+    assert(strstr(output, "TCP 12345->22 flags=0x02") != NULL);
+    assert(strstr(output, "payload=4; SSH headers IPv4=20 TCP=20 hex=") != NULL);
+    assert(strstr(output, "4500002c") != NULL);
+    assert(strstr(output, "deadbeef") == NULL);
+    assert(strcmp(sn_protocol_security_advisory(&packet),
+                  "SECURITY: SSH payload is not decoded; endpoints, timing, and packet sizes remain visible") == 0);
+
+    ipv4_packet[32] = 0xf0U;
+    assert(!sn_protocol_decode_with_modes(&packet, output, sizeof(output),
+                                          false, false, modes));
+    assert(output[0] == '\0');
+
+    uint8_t maximum_headers[120U] = {0};
+    struct sn_packet_view maximum_packet = {0};
+    maximum_headers[0] = 0x4fU;
+    maximum_headers[3] = (uint8_t)sizeof(maximum_headers);
+    maximum_headers[9] = 6U;
+    maximum_headers[63] = 22U;
+    maximum_headers[72] = 0xf0U;
+    maximum_packet.protocol = 6U;
+    maximum_packet.transport_header_present = true;
+    maximum_packet.ipv4_packet = maximum_headers;
+    maximum_packet.ipv4_packet_length = sizeof(maximum_headers);
+    maximum_packet.ipv4_header_length = 60U;
+    maximum_packet.ipv4_total_length = sizeof(maximum_headers);
+    maximum_packet.transport = maximum_headers + 60U;
+    maximum_packet.transport_length = 60U;
+    assert(sn_protocol_decode_with_modes(&maximum_packet, output, sizeof(output),
+                                         false, false, modes));
+    assert(strlen(output) == 254U);
+}
+
 static void test_tcp_and_udp_metadata(void)
 {
     uint8_t tcp[25] = {0};
@@ -1113,6 +1179,7 @@ int main(void)
 {
     test_tainted_extension_gate_and_output_sanitizing();
     test_protocol_mode_selects_extension_or_simplified_decoder();
+    test_ssh_raw_mode_shows_headers_without_payload();
     test_tcp_and_udp_metadata();
     test_telnet_negotiation_is_decoded_without_payload_text();
     test_telnet_commands_and_truncated_sequences();

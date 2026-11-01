@@ -48,3 +48,36 @@ Remote: `https://github.com/sonikbhoom/sniffit-ng.git`
 
 - `SESSION_TRANSCRIPT_2026-10-10.jsonl` is a local copy of the Copilot chat transcript and is excluded from Git because it may include private conversation and machine/network details.
 - Do not stage or publish the raw transcript without explicit review and consent.
+
+## Handoff Checkpoint — 2026-10-11
+
+The user paused work for today. Do not continue implementation, rebuild, run capture, or roll back unless they ask to resume. They may later request a rollback to the last state where Telnet decode presentation was working; no commit or clean rollback point has been created, so preserve all current edits and identify the desired baseline before reverting anything.
+
+### Current Issue
+
+- The user reports that the Telnet `FULL DECODE` view is still missing its five explanatory lines and that SSH still does not visually match Telnet. Treat both reports as unresolved; do not claim the live UI is fixed based only on PTY fixtures.
+- The reference `examples/telnet.png` shows the five lines: `FULL DECODE` capture metadata, local-link address, packet claims/flags, unauthenticated-source caveat, and the hex-purpose line.
+- `src/ui.c` currently has a dedicated Telnet full-frame renderer and a separate SSH header-only renderer. SSH uses the `FULL DECODE` heading and should show link/IP/TCP headers only. The user says observed behavior is still broken; live output has not been reproduced safely in this session.
+- The active default config is `/home/sonik/.config/sniffit-ng/config` (`XDG_CONFIG_HOME` was unset when checked); it contains `full_decode = true`, `telnet = raw`, and `ssh = raw`. Configuration mode is not the apparent cause.
+- The PTY fixture was changed to send a generated TCP/22 frame through `sn_monitor_process` rather than manually seed the SSH record. Its last focused run passed, and the last full CTest run before the latest `decode_ssh.c` edit passed 18 tests with `capture_live_loopback` skipped by its permission gate.
+
+### Current Worktree / Validation
+
+- The worktree is intentionally dirty across the SSH implementation, monitor/UI, tests, build metadata, README, and flow changes. `1-day-logging.md` and `src/decode_ssh.c` are untracked. Preserve these and other user edits; do not use blanket checkout/reset operations.
+- The user indicated that `src/decode_ssh.c` changed after the last request. Its current contents include the token `&&qq` in the SSH port check between the source-port and destination-port comparisons. Do not overwrite this edit; inspect with the user when resuming. No build or tests have run after that observed change, and the last passing binary is therefore not proof that the current source builds.
+- Last full build path: `build/relocated-live/sniffit-ng`. A rebuild may clear `CAP_NET_RAW`; no live capture was performed as part of this checkpoint.
+- Prior PTY assertion failures generated SIGABRT messages during test iteration. The test PTY checks are assert-based; disable core creation in the test shell (`ulimit -c 0`) when resuming focused runs if desired. No core files were found in the workspace.
+- Screenshots in `examples/` are local reference assets; leave them unmodified and unpublished.
+
+## REMINDER: Remove the Performance Monitor When Done (installed 2026-10-12)
+
+A root cron job samples every `sniffit-ng` process (CPU, memory, fds, host load) into `/var/log/sniffit-ng-perf/perf.csv`. It runs unattended, so remove it once the measurement run is finished.
+
+1. Review results first: `sudo SNIFFIT_NG_PERF_DIR=/var/log/sniffit-ng-perf /usr/local/sbin/sniffit-ng-perf.sh summary`. Copy `perf.csv*` elsewhere if the data should be kept.
+2. Stop sampling: `sudo rm /etc/cron.d/sniffit-ng-perf`
+3. Remove the root-owned script: `sudo rm /usr/local/sbin/sniffit-ng-perf.sh`
+4. Remove logs and state (root-only, includes rotated files): `sudo rm -rf /var/log/sniffit-ng-perf`
+5. Verify nothing remains: `ls /etc/cron.d/sniffit-ng-perf /usr/local/sbin/sniffit-ng-perf.sh /var/log/sniffit-ng-perf` should report "No such file or directory" for each.
+6. Optional: delete `scripts/sniffit-ng-perf.sh` from this repo, or keep it for future runs.
+
+Re-installing after a script change needs `sudo install -o root -g root -m 0755 scripts/sniffit-ng-perf.sh /usr/local/sbin/sniffit-ng-perf.sh`.

@@ -5,7 +5,7 @@
 static const char *const module_names[SN_DECODER_MODULE_COUNT] = {
     "icmp", "igmp", "tcp", "http", "dns", "tls", "tacacs", "syslog",
     "udp", "dhcp4", "snmp", "ntp", "quic", "rtp", "rtcp", "radius",
-    "vrrp", "telnet"
+    "vrrp", "telnet", "ssh"
 };
 
 const char *sn_decoder_module_name(enum sn_decoder_module module)

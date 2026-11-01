@@ -7,7 +7,8 @@
 
 struct packet_fixture {
     struct sn_packet_view view;
-    uint8_t transport[8];
+    uint8_t transport[64];
+    uint8_t payload[64];
 };
 
 static void set_port(uint8_t *bytes, uint16_t port)
@@ -40,12 +41,57 @@ static struct packet_fixture make_tcp_packet(
     packet.view.destination_ipv4[3] = destination_last;
     set_port(packet.transport, source_port);
     set_port(packet.transport + 2U, destination_port);
+    packet.transport[12] = 0x50U;
     return packet;
 }
 
 static void bind_packet_buffer(struct packet_fixture *packet)
 {
     packet->view.transport = packet->transport;
+    if (packet->view.protocol == 17U) {
+        packet->view.payload = packet->payload;
+    }
+}
+
+static struct packet_fixture make_dns_packet(bool response,
+                                             uint8_t source_last,
+                                             uint16_t source_port,
+                                             uint8_t destination_last,
+                                             uint16_t destination_port,
+                                             uint16_t identifier)
+{
+    struct packet_fixture packet = {0};
+    static const uint8_t question[] = {
+        7U, 'e', 'x', 'a', 'm', 'p', 'l', 'e',
+        3U, 'c', 'o', 'm', 0U, 0U, 1U, 0U, 1U
+    };
+    size_t dns_length = 12U + sizeof(question);
+
+    packet.view.protocol = 17U;
+    packet.view.ipv4_total_length = (uint16_t)(20U + 8U + dns_length);
+    packet.view.source_ipv4[0] = 192U;
+    packet.view.source_ipv4[1] = 0U;
+    packet.view.source_ipv4[2] = 2U;
+    packet.view.source_ipv4[3] = source_last;
+    packet.view.destination_ipv4[0] = 192U;
+    packet.view.destination_ipv4[1] = 0U;
+    packet.view.destination_ipv4[2] = 2U;
+    packet.view.destination_ipv4[3] = destination_last;
+    packet.view.transport = packet.transport;
+    packet.view.transport_length = 8U + dns_length;
+    packet.view.transport_header_present = true;
+    packet.view.payload = packet.payload;
+    packet.view.payload_length = dns_length;
+    set_port(packet.transport, source_port);
+    set_port(packet.transport + 2U, destination_port);
+    set_port(packet.transport + 4U, (uint16_t)(8U + dns_length));
+    packet.payload[0] = (uint8_t)(identifier >> 8);
+    packet.payload[1] = (uint8_t)identifier;
+    packet.payload[2] = response ? 0x81U : 0x01U;
+    packet.payload[3] = response ? 0x80U : 0x00U;
+    packet.payload[5] = 1U;
+    memcpy(packet.payload + 12U, question, sizeof(question));
+    return packet;
 }
 
 static void test_reverse_packets_update_one_flow(void)
@@ -67,6 +113,32 @@ static void test_reverse_packets_update_one_flow(void)
     assert(sn_flow_table_count(&table) == 1U);
     assert(flow->packets[0] == 1U && flow->packets[1] == 1U);
     assert(flow->bytes[1] == 80U);
+}
+
+static void test_syn_only_flow_requires_header_only_syn_packets(void)
+{
+    struct sn_flow_table table;
+    const struct sn_flow *flow = NULL;
+    struct packet_fixture packet = make_tcp_packet(1U, 40000U, 2U, 23U, 40U);
+
+    bind_packet_buffer(&packet);
+    packet.transport[13] = 0x02U;
+    sn_flow_table_init(&table, UINT64_MAX);
+    assert(sn_flow_table_update(&table, &packet.view, 1U, &flow) == SN_FLOW_CREATED);
+    assert(flow->tcp_syn_only_no_payload);
+    assert(sn_flow_table_update(&table, &packet.view, 2U, &flow) == SN_FLOW_UPDATED);
+    assert(flow->tcp_syn_only_no_payload);
+
+    packet.transport[13] = 0x12U;
+    assert(sn_flow_table_update(&table, &packet.view, 3U, &flow) == SN_FLOW_UPDATED);
+    assert(!flow->tcp_syn_only_no_payload);
+
+    packet = make_tcp_packet(3U, 40001U, 4U, 23U, 41U);
+    bind_packet_buffer(&packet);
+    packet.transport[13] = 0x02U;
+    packet.view.payload_length = 1U;
+    assert(sn_flow_table_update(&table, &packet.view, 4U, &flow) == SN_FLOW_CREATED);
+    assert(!flow->tcp_syn_only_no_payload);
 }
 
 static void test_idle_timeout_expires_flow(void)
@@ -293,22 +365,77 @@ static void test_protocol_decode_history_is_bounded_metadata(void)
     sn_flow_table_init(&table, UINT64_MAX);
     assert(!table.inspect_payloads);
     for (uint64_t sequence = 0U;
-         sequence < SN_FLOW_DECODE_HISTORY_CAPACITY + 4U; ++sequence) {
+         sequence < SN_FLOW_DEFAULT_DECODE_HISTORY_CAPACITY + 4U; ++sequence) {
         igmp[7] = (uint8_t)sequence;
         assert(sn_flow_table_update(&table, &packet, sequence + 1U, &flow) ==
                (sequence == 0U ? SN_FLOW_CREATED : SN_FLOW_UPDATED));
     }
-    assert(flow->decode_history_count == SN_FLOW_DECODE_HISTORY_CAPACITY);
+    assert(flow->decode_history_count == SN_FLOW_DEFAULT_DECODE_HISTORY_CAPACITY);
     assert(strstr(sn_flow_decode_history_at(flow, 0U)->text, "239.1.2.4") != NULL);
     assert(strstr(sn_flow_decode_history_at(flow,
-                   SN_FLOW_DECODE_HISTORY_CAPACITY - 1U)->text,
+                   SN_FLOW_DEFAULT_DECODE_HISTORY_CAPACITY - 1U)->text,
                    "239.1.2.19") != NULL);
-    assert(sn_flow_decode_history_at(flow, SN_FLOW_DECODE_HISTORY_CAPACITY) == NULL);
+    assert(sn_flow_decode_history_at(
+               flow, SN_FLOW_DEFAULT_DECODE_HISTORY_CAPACITY) == NULL);
+}
+
+static void test_dns_queries_share_a_long_lived_session(void)
+{
+    struct sn_flow_table table;
+    const struct sn_flow *flow = NULL;
+    struct packet_fixture packet;
+    const uint64_t minute_ns = 60000000000ULL;
+
+    sn_flow_table_init(&table, 0U);
+    for (uint16_t identifier = 1U; identifier <= 40U; ++identifier) {
+        uint64_t packet_time_ns = identifier == 1U ? 1000000000ULL :
+            identifier == 2U ? 120000000000ULL :
+            120000000000ULL + ((uint64_t)identifier - 2U) * 1000000000ULL;
+
+        packet = make_dns_packet(false, 1U,
+                                 (uint16_t)(53000U + identifier),
+                                 53U, 53U, identifier);
+        bind_packet_buffer(&packet);
+        assert(sn_flow_table_update(&table, &packet.view, packet_time_ns,
+                                    &flow) ==
+               (identifier == 1U ? SN_FLOW_CREATED : SN_FLOW_UPDATED));
+        assert(flow != NULL && flow->dns_session);
+
+        packet = make_dns_packet(true, 53U, 53U, 1U,
+                                 (uint16_t)(53000U + identifier), identifier);
+        bind_packet_buffer(&packet);
+        assert(sn_flow_table_update(&table, &packet.view,
+                                    packet_time_ns + 1000000ULL,
+                                    &flow) == SN_FLOW_UPDATED);
+    }
+
+    assert(sn_flow_table_count(&table) == 1U);
+    assert(flow->endpoints[0].ipv4[3] == 1U);
+    assert(flow->endpoints[0].port == 0U);
+    assert(flow->endpoints[1].ipv4[3] == 53U);
+    assert(flow->endpoints[1].port == 53U);
+    assert(flow->packets[0] == 40U && flow->packets[1] == 40U);
+    assert(flow->decode_history_count == SN_FLOW_DECODE_HISTORY_CAPACITY);
+    assert(strstr(sn_flow_decode_history_at(flow, 0U)->text,
+                  "DNS REQUEST id=0x0019") != NULL);
+    assert(strstr(sn_flow_decode_history_at(flow, 1U)->text,
+                  "DNS RESPONSE id=0x0019") != NULL);
+    assert(strstr(sn_flow_decode_history_at(
+                      flow, SN_FLOW_DECODE_HISTORY_CAPACITY - 1U)->text,
+                  "DNS RESPONSE id=0x0028") != NULL);
+
+    packet = make_dns_packet(false, 1U, 53100U, 53U, 53U, 0x1234U);
+    bind_packet_buffer(&packet);
+    assert(sn_flow_table_update(&table, &packet.view,
+                                flow->last_seen_ns + 5U * minute_ns,
+                                &flow) == SN_FLOW_CREATED);
+    assert(sn_flow_table_count(&table) == 1U);
 }
 
 int main(void)
 {
     test_reverse_packets_update_one_flow();
+    test_syn_only_flow_requires_header_only_syn_packets();
     test_idle_timeout_expires_flow();
     test_invalid_and_unsupported_packets();
     test_capacity_evicts_oldest_flow();
@@ -317,6 +444,7 @@ int main(void)
     test_icmp_payload_requires_opt_in_and_is_bounded();
     test_icmp_history_keeps_recent_samples_in_order();
     test_protocol_decode_history_is_bounded_metadata();
+    test_dns_queries_share_a_long_lived_session();
     puts("flow tests passed");
     return 0;
 }

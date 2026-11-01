@@ -170,6 +170,8 @@ static const char *security_note(const struct sn_packet_view *packet,
         return "SECURITY: RADIUS attributes are not encrypted; protect the transport or use RadSec";
     case SN_DECODER_TELNET:
         return "SECURITY: WEAK; Telnet exposes credentials and sessions, use SSH";
+    case SN_DECODER_SSH:
+        return "SECURITY: SSH payload is not decoded; endpoints, timing, and packet sizes remain visible";
     case SN_DECODER_TCP:
         if (is_legacy_cleartext_tcp_port(source_port) ||
             is_legacy_cleartext_tcp_port(destination_port)) {
@@ -209,6 +211,9 @@ static enum sn_decoder_module decoder_module_for_packet(
     }
 
     if (packet->protocol == 6U) {
+        if (source_port == 22U || destination_port == 22U) {
+            return SN_DECODER_SSH;
+        }
         if (source_port == 23U || destination_port == 23U) {
             return SN_DECODER_TELNET;
         }
@@ -315,7 +320,9 @@ static bool decode_with_policy(
         output[0] = '\0';
     }
     if (raw_mode) {
-        decoded = decode_raw_ipv4(packet, output, output_capacity);
+        decoded = module == SN_DECODER_SSH ?
+            sn_decode_ssh_raw_headers(packet, output, output_capacity) :
+            decode_raw_ipv4(packet, output, output_capacity);
         if (!decoded) {
             output[0] = '\0';
         }

@@ -8,7 +8,7 @@
 #include <stddef.h>
 
 #define SN_PACKET_DECODE_TEXT_CAPACITY 256U
-#define SN_FLOW_DECODE_HISTORY_CAPACITY 16U
+#define SN_FLOW_DECODE_HISTORY_CAPACITY 32U
 
 struct sn_packet_decode_record {
     char text[SN_PACKET_DECODE_TEXT_CAPACITY];

@@ -91,6 +91,7 @@ static void seed_flows(struct sn_monitor *monitor)
     first->endpoints[1].ipv4[3] = 7U;
     first->endpoints[1].port = 23U;
     first->packets[0] = 1U;
+    first->tcp_syn_only_no_payload = true;
     (void)snprintf(first->security_advisory, sizeof(first->security_advisory),
                    "SECURITY: unencrypted and unauthenticated diagnostic traffic");
     first->decode_history_count = 1U;
@@ -122,7 +123,6 @@ static enum sn_ui_poll_result inject_new_flow(void *opaque, const char **status)
 {
     struct ui_poll_context *context = opaque;
     struct sn_flow *selected = &context->monitor->flows.entries[0];
-    struct sn_flow *new_flow = &context->monitor->flows.entries[2];
     char trigger;
 
     (void)status;
@@ -146,25 +146,52 @@ static enum sn_ui_poll_result inject_new_flow(void *opaque, const char **status)
         context->monitor->full_decode_count = 2U;
         context->monitor->full_decode_sequence = 2U;
     }
-    *new_flow = (struct sn_flow){0};
-    new_flow->active = true;
-    new_flow->protocol = 6U;
-    new_flow->endpoints[0].ipv4[0] = 10U;
-    new_flow->endpoints[0].ipv4[3] = 1U;
-    new_flow->endpoints[0].port = 1234U;
-    new_flow->endpoints[1].ipv4[0] = 10U;
-    new_flow->endpoints[1].ipv4[3] = 2U;
-    new_flow->endpoints[1].port = 443U;
-    context->monitor->events[0] = (struct sn_monitor_event){
-        .kind = SN_MONITOR_FLOW_UPDATED,
-        .flow = *selected
-    };
-    context->monitor->events[1] = (struct sn_monitor_event){
-        .kind = SN_MONITOR_FLOW_CREATED,
-        .flow = *new_flow
-    };
-    context->monitor->event_head = 0U;
-    context->monitor->event_count = 2U;
+    {
+        uint8_t frame[58U] = {0};
+        uint8_t *ip = frame + 14U;
+        uint8_t *tcp = ip + 20U;
+        struct sn_capture_packet packet = {0};
+
+        frame[6] = 0x02U;
+        frame[11] = 0x01U;
+        write_be16(frame + 12U, 0x0800U);
+        ip[0] = 0x45U;
+        write_be16(ip + 2U, 44U);
+        ip[8] = 64U;
+        ip[9] = 6U;
+        ip[12] = 10U;
+        ip[15] = 1U;
+        ip[16] = 10U;
+        ip[19] = 2U;
+        write_be16(tcp, 1234U);
+        write_be16(tcp + 2U, 22U);
+        tcp[3] = 0x16U;
+        tcp[4] = 0x01U;
+        tcp[5] = 0x02U;
+        tcp[6] = 0x03U;
+        tcp[7] = 0x04U;
+        tcp[12] = 0x50U;
+        tcp[13] = 0x02U;
+        frame[54] = 0xdeU;
+        frame[55] = 0xadU;
+        frame[56] = 0xbeU;
+        frame[57] = 0xefU;
+        packet.data = frame;
+        packet.captured_length = sizeof(frame);
+        packet.wire_length = sizeof(frame);
+        packet.timestamp.tv_sec = 1700000001;
+        packet.timestamp.tv_usec = 234567;
+        packet.link_type = SN_PACKET_LINK_ETHERNET;
+
+        context->monitor->events[0] = (struct sn_monitor_event){
+            .kind = SN_MONITOR_FLOW_UPDATED,
+            .flow = *selected
+        };
+        context->monitor->event_head = 0U;
+        context->monitor->event_count = 1U;
+        assert(sn_monitor_process(context->monitor, &packet) ==
+               SN_MONITOR_PROCESSED);
+    }
     return SN_UI_POLL_UPDATED;
 }
 
@@ -226,8 +253,10 @@ int main(void)
     bool protocol_filter_applied;
     bool filters_cleared_by_reset;
     bool new_full_decode_visible_while_open;
+    bool ssh_header_dump_visible;
+    bool ssh_header_row_visible;
 
-    terminal_size.ws_row = 30U;
+    terminal_size.ws_row = 45U;
     terminal_size.ws_col = 80U;
     assert(pipe(trigger_pipe) == 0);
     assert(fcntl(trigger_pipe[0], F_SETFL, O_NONBLOCK) == 0);
@@ -235,6 +264,7 @@ int main(void)
     assert(child >= 0);
     if (child == 0) {
         struct sn_monitor monitor;
+        enum sn_decoder_mode decoder_modes[SN_DECODER_MODULE_COUNT] = {0};
         struct sn_network_info network_info = {
             .interface_name = "ppp0",
             .local_ipv4 = "192.168.1.7",
@@ -242,7 +272,6 @@ int main(void)
         };
         struct ui_poll_context poll_context;
         const struct sn_ui_priority_port priority_ports[] = {
-            {.protocol = 6U, .port = 22U},
             {.protocol = 6U, .port = 23U},
             {.protocol = 17U, .port = 53U}
         };
@@ -250,6 +279,8 @@ int main(void)
         (void)close(trigger_pipe[1]);
         (void)setenv("TERM", "xterm-256color", 1);
         sn_monitor_init(&monitor, UINT64_MAX);
+        decoder_modes[SN_DECODER_SSH] = SN_DECODER_RAW;
+        sn_monitor_set_decode_options(&monitor, false, false, decoder_modes);
         seed_flows(&monitor);
         seed_full_decode(&monitor);
         poll_context = (struct ui_poll_context){
@@ -311,9 +342,23 @@ int main(void)
     details_opened = read_until(master_fd, output, sizeof(output), &output_length,
                                 "TCP flow", 1000);
     assert(read_until(master_fd, output, sizeof(output), &output_length,
-                      "FULL TELNET HEX", 1000));
+                      "SYN ONLY / NO PAYLOAD", 1000));
     assert(read_until(master_fd, output, sizeof(output), &output_length,
                       "152.2.23.104:40000", 1000));
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "FULL DECODE #1", 1000));
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "captured=57", 1000));
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "wire=57", 1000));
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "stored=57", 1000));
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "link=Ethernet", 1000));
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "Local-link MAC src=02:00", 1000));
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "Packet claims: 152.2.23.104:40000", 1000));
     assert(read_until(master_fd, output, sizeof(output), &output_length,
                       "flags=0x02 ns=0 [SYN]", 1000));
     assert(read_until(master_fd, output, sizeof(output), &output_length,
@@ -342,10 +387,27 @@ int main(void)
     new_full_decode_visible_while_open =
         read_until(master_fd, output, sizeof(output), &output_length,
                    "ff fb 03", 1000);
+    output[0] = '\0';
+    output_length = 0U;
     assert(write(master_fd, "\033OB\033OB", 6U) == 6);
     details_followed_highlight =
         read_until(master_fd, output, sizeof(output), &output_length,
                    "A 10.0.0.1:1234", 1000);
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "SECURITY: SSH payload is not decoded", 1000));
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "FULL DECODE #1", 1000));
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "Local-link MAC src=02:00", 1000));
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "Packet claims: 10.0.0.1:1234", 1000));
+    ssh_header_dump_visible =
+        read_until(master_fd, output, sizeof(output), &output_length,
+                   "Hex bytes include link", 1000);
+    ssh_header_row_visible =
+        read_until(master_fd, output, sizeof(output), &output_length,
+                   "0000  00 00 00 00 00 00", 1000);
+    assert(strstr(output, "de ad be ef") == NULL);
     output[0] = '\0';
     output_length = 0U;
     assert(write(master_fd, "q1", 2U) == 2);
@@ -388,6 +450,8 @@ int main(void)
     assert(selected_counters_updated);
     assert(details_followed_highlight);
     assert(new_full_decode_visible_while_open);
+    assert(ssh_header_dump_visible);
+    assert(ssh_header_row_visible);
     assert(protocol_filter_applied);
     assert(filters_cleared_by_reset);
     puts("curses pty interaction test passed");

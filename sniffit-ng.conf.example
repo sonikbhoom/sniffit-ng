@@ -44,6 +44,7 @@ rtcp = simplified
 radius = simplified
 vrrp = simplified
 telnet = simplified
+ssh = simplified
 
 # To acknowledge payload inspection, enable the option and make the next line active
 # by removing its leading '# ' characters. This acknowledgment is stored in this

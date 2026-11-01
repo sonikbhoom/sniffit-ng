@@ -47,6 +47,7 @@ add_library(sniffit_decode STATIC
     src/decode_icmp.c
     src/decode_tcp.c
     src/decode_telnet.c
+    src/decode_ssh.c
     src/decode_http.c
     src/decode_udp.c
     src/decode_igmp.c

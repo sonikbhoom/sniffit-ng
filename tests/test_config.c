@@ -179,11 +179,13 @@ static void test_decoder_modes_are_named_and_validated(void)
     write_config_file(path,
         "dns = raw\n"
         "http = simplified\n"
-        "telnet = raw\n");
+        "telnet = raw\n"
+        "ssh = raw\n");
     assert(sn_config_load_file(path, &config, error, sizeof(error)));
     assert(config.decoder_modes[SN_DECODER_DNS] == SN_DECODER_RAW);
     assert(config.decoder_modes[SN_DECODER_HTTP] == SN_DECODER_SIMPLIFIED);
     assert(config.decoder_modes[SN_DECODER_TELNET] == SN_DECODER_RAW);
+    assert(config.decoder_modes[SN_DECODER_SSH] == SN_DECODER_RAW);
     assert(unlink(path) == 0);
 
     write_config_file(path, "dns = detailed\n");

@@ -22,6 +22,7 @@ enum sn_decoder_module {
     SN_DECODER_RADIUS,
     SN_DECODER_VRRP,
     SN_DECODER_TELNET,
+    SN_DECODER_SSH,
     SN_DECODER_MODULE_COUNT
 };
 

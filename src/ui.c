@@ -93,6 +93,18 @@ static const char *protocol_name(uint8_t protocol)
     }
 }
 
+static const char *flow_port_text(const struct sn_flow *flow,
+                                  size_t endpoint_index,
+                                  char buffer[6])
+{
+    if (flow->dns_session && flow->endpoints[endpoint_index].port == 0U) {
+        return "*";
+    }
+    (void)snprintf(buffer, 6U, "%u",
+                   (unsigned int)flow->endpoints[endpoint_index].port);
+    return buffer;
+}
+
 static uint64_t monotonic_time_ns(void)
 {
     struct timespec now;
@@ -190,7 +202,7 @@ static void draw_screen(struct sn_monitor *monitor,
 
     if (monitor->full_decode_enabled) {
         (void)snprintf(title, sizeof(title),
-                       "Sniffit NG | FULL TELNET HEX");
+                       "Sniffit NG | FULL DECODE");
     }
     erase();
     if (COLS < 80 || LINES < 18) {
@@ -247,6 +259,8 @@ static void draw_screen(struct sn_monitor *monitor,
     for (size_t row = 0U; row < visible_rows; ++row) {
         char endpoint_a[INET_ADDRSTRLEN] = "?";
         char endpoint_b[INET_ADDRSTRLEN] = "?";
+        char endpoint_a_port[6];
+        char endpoint_b_port[6];
         size_t flow_index = scroll_start + row;
         const struct sn_flow *flow = flows[flow_index];
         bool priority_flow = sn_ui_flow_is_priority(
@@ -274,14 +288,14 @@ static void draw_screen(struct sn_monitor *monitor,
                   COLOR_PAIR(UI_COLOR_LOCAL_ADDRESS) : 0)));
         printw("%-15s", endpoint_a);
         attrset(session_attributes);
-        printw(":%-5u <-> ", flow->endpoints[0].port);
+        printw(":%-5s <-> ", flow_port_text(flow, 0U, endpoint_a_port));
         attrset(row_attributes | (priority_flow ? priority_attributes :
                  (apply_flow_colors && endpoint_b_is_local ?
                   COLOR_PAIR(UI_COLOR_LOCAL_ADDRESS) : 0)));
         printw("%-15s", endpoint_b);
         attrset(session_attributes);
-        printw(":%-5u %8llu/%-8llu",
-               flow->endpoints[1].port,
+        printw(":%-5s %8llu/%-8llu",
+               flow_port_text(flow, 1U, endpoint_b_port),
                (unsigned long long)flow->packets[0],
                (unsigned long long)flow->packets[1]);
         attrset(A_NORMAL);
@@ -439,6 +453,7 @@ static void set_protocol_filter(const char *prompt, bool *enabled,
 static bool same_flow_identity(const struct sn_flow *left, const struct sn_flow *right)
 {
     return left->protocol == right->protocol &&
+           left->dns_session == right->dns_session &&
            memcmp(left->endpoints[0].ipv4, right->endpoints[0].ipv4, 4U) == 0 &&
            left->endpoints[0].port == right->endpoints[0].port &&
            memcmp(left->endpoints[1].ipv4, right->endpoints[1].ipv4, 4U) == 0 &&
@@ -489,10 +504,141 @@ static void append_icmp_sample(WINDOW *history,
     (void)waddch(history, '\n');
 }
 
+static void append_hex_rows(WINDOW *history,
+                            const uint8_t *bytes,
+                            size_t length)
+{
+    for (size_t offset = 0U; offset < length; offset += 16U) {
+        size_t row_length = length - offset;
+
+        if (row_length > 16U) {
+            row_length = 16U;
+        }
+        (void)wprintw(history, "%04zx  ", offset);
+        for (size_t index = 0U; index < row_length; ++index) {
+            (void)wprintw(history, "%02x%s", bytes[offset + index],
+                          index + 1U == row_length ? "" : " ");
+        }
+        (void)waddch(history, '\n');
+    }
+}
+
+static int hex_digit_value(char character)
+{
+    if (character >= '0' && character <= '9') {
+        return character - '0';
+    }
+    if (character >= 'a' && character <= 'f') {
+        return character - 'a' + 10;
+    }
+    if (character >= 'A' && character <= 'F') {
+        return character - 'A' + 10;
+    }
+    return -1;
+}
+
+static bool parse_ssh_header_length(const char **cursor,
+                                   char delimiter,
+                                   size_t *length)
+{
+    const char *start = *cursor;
+    size_t value = 0U;
+
+    while (isdigit((unsigned char)**cursor)) {
+        size_t digit = (size_t)(**cursor - '0');
+
+        if (value > (60U - digit) / 10U) {
+            return false;
+        }
+        value = value * 10U + digit;
+        ++*cursor;
+    }
+    if (*cursor == start || **cursor != delimiter || value < 20U ||
+        value > 60U || value % 4U != 0U) {
+        return false;
+    }
+    ++*cursor;
+    *length = value;
+    return true;
+}
+
+static bool append_ssh_header_dump(WINDOW *history, const char *text)
+{
+    static const char ssh_header_marker[] = "; SSH headers IPv4=";
+    const char *summary_end = NULL;
+    const char *hex_bytes = NULL;
+    const char *cursor;
+    size_t ipv4_header_length;
+    size_t tcp_header_length;
+    size_t byte_length;
+    bool recognized = false;
+
+    if (strncmp(text, "TCP ", 4U) == 0) {
+        const char *marker = strstr(text, ssh_header_marker);
+
+        if (marker == NULL) {
+            return false;
+        }
+        recognized = true;
+        summary_end = marker;
+        cursor = marker + sizeof(ssh_header_marker) - 1U;
+        if (!parse_ssh_header_length(&cursor, ' ', &ipv4_header_length) ||
+            strncmp(cursor, "TCP=", 4U) != 0) {
+            goto invalid_record;
+        }
+        cursor += 4U;
+        if (!parse_ssh_header_length(&cursor, ' ', &tcp_header_length) ||
+            strncmp(cursor, "hex=", 4U) != 0) {
+            goto invalid_record;
+        }
+        hex_bytes = cursor + 4U;
+    } else if (strncmp(text, "SSH hdr ", 8U) == 0) {
+        recognized = true;
+        cursor = text + 8U;
+        if (!parse_ssh_header_length(&cursor, '/', &ipv4_header_length) ||
+            !parse_ssh_header_length(&cursor, ' ', &tcp_header_length)) {
+            goto invalid_record;
+        }
+        hex_bytes = cursor;
+    } else {
+        return false;
+    }
+
+    byte_length = ipv4_header_length + tcp_header_length;
+    if (strlen(hex_bytes) != byte_length * 2U) {
+        goto invalid_record;
+    }
+    for (size_t index = 0U; index < byte_length; ++index) {
+        int high = hex_digit_value(hex_bytes[index * 2U]);
+        int low = hex_digit_value(hex_bytes[index * 2U + 1U]);
+
+        if (high < 0 || low < 0) {
+            goto invalid_record;
+        }
+    }
+
+    if (summary_end != NULL) {
+        (void)wprintw(history, "%.*s\n", (int)(summary_end - text), text);
+    } else {
+        (void)wprintw(history,
+                      "SSH header-only packet IPv4=%zu TCP=%zu bytes\n",
+                      ipv4_header_length, tcp_header_length);
+    }
+    (void)waddch(history, '\n');
+    return true;
+
+invalid_record:
+    if (recognized) {
+        (void)waddstr(history, "SSH header dump unavailable: invalid header record.\n\n");
+    }
+    return recognized;
+}
+
 static void append_decode_record(WINDOW *history,
                                  const struct sn_packet_decode_record *record)
 {
-    if (record != NULL && record->text[0] != '\0') {
+    if (record != NULL && record->text[0] != '\0' &&
+        !append_ssh_header_dump(history, record->text)) {
         (void)wprintw(history, "%s\n\n", record->text);
     }
 }
@@ -508,10 +654,27 @@ static bool full_decode_record_matches_flow(
            memcmp(record->endpoints[1].ipv4, flow->endpoints[1].ipv4, 4U) == 0;
 }
 
+static bool ssh_header_record_matches_flow(
+    const struct sn_ssh_header_record *record,
+    const struct sn_flow *flow)
+{
+    return record != NULL && record->active && flow != NULL &&
+           flow->protocol == 6U && record->endpoints[0].port == flow->endpoints[0].port &&
+           record->endpoints[1].port == flow->endpoints[1].port &&
+           memcmp(record->endpoints[0].ipv4, flow->endpoints[0].ipv4, 4U) == 0 &&
+           memcmp(record->endpoints[1].ipv4, flow->endpoints[1].ipv4, 4U) == 0;
+}
+
 static bool flow_is_telnet(const struct sn_flow *flow)
 {
     return flow != NULL && flow->protocol == 6U &&
            (flow->endpoints[0].port == 23U || flow->endpoints[1].port == 23U);
+}
+
+static bool flow_is_ssh(const struct sn_flow *flow)
+{
+    return flow != NULL && flow->protocol == 6U &&
+           (flow->endpoints[0].port == 22U || flow->endpoints[1].port == 22U);
 }
 
 static void append_full_decode_record(WINDOW *history,
@@ -628,6 +791,124 @@ static void append_full_decode_record(WINDOW *history,
     (void)waddch(history, '\n');
 }
 
+static void append_ssh_header_record(WINDOW *history,
+                                     const struct sn_ssh_header_record *record)
+{
+    static const struct {
+        uint8_t mask;
+        const char *name;
+    } flag_names[] = {
+        {0x80U, "CWR"}, {0x40U, "ECE"}, {0x20U, "URG"},
+        {0x10U, "ACK"}, {0x08U, "PSH"}, {0x04U, "RST"},
+        {0x02U, "SYN"}, {0x01U, "FIN"}
+    };
+    struct sn_packet_view view;
+    uint8_t adjusted_bytes[SN_MONITOR_SSH_HEADER_PACKET_CAPACITY];
+    enum sn_packet_result parse_result;
+
+    (void)wprintw(history,
+                  "FULL DECODE #%llu %lld.%06ld captured=%zu wire=%zu stored=%zu link=%s\n",
+                  (unsigned long long)record->sequence,
+                  (long long)record->timestamp.tv_sec,
+                  (long)record->timestamp.tv_usec,
+                  record->captured_length, record->wire_length, record->stored_length,
+                  record->link_type == SN_PACKET_LINK_ETHERNET ?
+                      "Ethernet" : "Linux-SLL");
+    if (record->link_type == SN_PACKET_LINK_ETHERNET &&
+        record->stored_length >= 12U) {
+        (void)wprintw(history,
+                      "Local-link MAC src=%02x:%02x:%02x:%02x:%02x:%02x "
+                      "dst=%02x:%02x:%02x:%02x:%02x:%02x (direction unavailable)\n",
+                      record->bytes[6], record->bytes[7], record->bytes[8],
+                      record->bytes[9], record->bytes[10], record->bytes[11],
+                      record->bytes[0], record->bytes[1], record->bytes[2],
+                      record->bytes[3], record->bytes[4], record->bytes[5]);
+    } else if (record->link_type == SN_PACKET_LINK_LINUX_SLL &&
+               record->stored_length >= 16U) {
+        size_t address_length =
+            ((size_t)record->bytes[4] << 8) | record->bytes[5];
+
+        (void)wprintw(history, "Linux-SLL packet type=%u local-link source=",
+                      (unsigned int)(((unsigned int)record->bytes[0] << 8) |
+                                     record->bytes[1]));
+        if (address_length > 8U) {
+            (void)waddstr(history, "invalid-length");
+        } else {
+            for (size_t index = 0U; index < address_length; ++index) {
+                (void)wprintw(history, "%02x", record->bytes[6U + index]);
+            }
+        }
+        (void)waddch(history, '\n');
+    } else {
+        (void)waddstr(history,
+                      "Ethernet direction is not encoded in the capture header.\n");
+    }
+
+    if (record->stored_length > sizeof(adjusted_bytes) ||
+        record->ipv4_offset > record->stored_length ||
+        record->ipv4_header_length > record->stored_length - record->ipv4_offset ||
+        record->tcp_header_length > record->stored_length - record->ipv4_offset -
+                                        record->ipv4_header_length ||
+        record->ipv4_offset + record->ipv4_header_length +
+                record->tcp_header_length != record->stored_length) {
+        parse_result = SN_PACKET_MALFORMED;
+    } else {
+        size_t total_length = record->ipv4_header_length +
+                              record->tcp_header_length;
+
+        memcpy(adjusted_bytes, record->bytes, record->stored_length);
+        adjusted_bytes[record->ipv4_offset + 2U] = (uint8_t)(total_length >> 8);
+        adjusted_bytes[record->ipv4_offset + 3U] = (uint8_t)total_length;
+        parse_result = sn_packet_parse_link_ipv4(adjusted_bytes,
+                                                 record->stored_length,
+                                                 record->link_type, &view);
+    }
+    if (parse_result == SN_PACKET_OK && view.protocol == 6U &&
+        view.transport_header_present && view.transport_length >= 20U) {
+        char source[INET_ADDRSTRLEN] = "?";
+        char destination[INET_ADDRSTRLEN] = "?";
+        uint8_t flags = view.transport[13];
+        bool has_flag = false;
+
+        (void)inet_ntop(AF_INET, view.source_ipv4, source, sizeof(source));
+        (void)inet_ntop(AF_INET, view.destination_ipv4, destination,
+                        sizeof(destination));
+        (void)wprintw(history,
+                      "Packet claims: %s:%u -> %s:%u flags=0x%02x ns=%u [",
+                      source,
+                      (unsigned int)(((unsigned int)view.transport[0] << 8) |
+                                     view.transport[1]),
+                      destination,
+                      (unsigned int)(((unsigned int)view.transport[2] << 8) |
+                                     view.transport[3]), flags,
+                      (unsigned int)(view.transport[12] & 0x01U));
+        for (size_t index = 0U;
+             index < sizeof(flag_names) / sizeof(flag_names[0]); ++index) {
+            if ((flags & flag_names[index].mask) != 0U) {
+                (void)wprintw(history, "%s%s", has_flag ? "|" : "",
+                              flag_names[index].name);
+                has_flag = true;
+            }
+        }
+        if (!has_flag) {
+            (void)waddstr(history, "none");
+        }
+        (void)waddstr(history, "]\n");
+    }
+    (void)waddstr(history,
+                  "IP source is unauthenticated; link source is local-link metadata.\n");
+    if (record->captured_length < record->wire_length) {
+        (void)wprintw(history,
+                      "Capture truncated: %zu of %zu wire bytes were recorded.\n",
+                      record->captured_length, record->wire_length);
+    }
+    (void)waddstr(history,
+                  "Hex bytes include link, IPv4, and TCP headers only; "
+                  "SSH payload is not stored or displayed.\n");
+    append_hex_rows(history, record->bytes, record->stored_length);
+    (void)waddch(history, '\n');
+}
+
 static bool append_latest_full_decode(struct sn_monitor *monitor,
                                       const struct sn_flow *flow,
                                       WINDOW *history,
@@ -657,6 +938,39 @@ static bool append_latest_full_decode(struct sn_monitor *monitor,
         return false;
     }
     append_full_decode_record(history, latest);
+    *seen_sequence = latest->sequence;
+    return true;
+}
+
+static bool append_latest_ssh_header(struct sn_monitor *monitor,
+                                     const struct sn_flow *flow,
+                                     WINDOW *history,
+                                     uint64_t *seen_sequence)
+{
+    const struct sn_ssh_header_record *latest = NULL;
+
+    if (!monitor->ssh_header_view_enabled || !flow_is_ssh(flow)) {
+        return false;
+    }
+    for (size_t index = 0U; index < sn_monitor_ssh_header_count(monitor); ++index) {
+        const struct sn_ssh_header_record *record =
+            sn_monitor_ssh_header_at(monitor, index);
+        if (ssh_header_record_matches_flow(record, flow)) {
+            latest = record;
+        }
+    }
+    if (latest == NULL) {
+        if (*seen_sequence == 0U) {
+            (void)waddstr(history,
+                          "SSH Header View: no recent valid TCP/22 packet is retained.\n"
+                          "Malformed or truncated packets are not attached to flows.\n");
+        }
+        return false;
+    }
+    if (latest->sequence <= *seen_sequence) {
+        return false;
+    }
+    append_ssh_header_record(history, latest);
     *seen_sequence = latest->sequence;
     return true;
 }
@@ -762,8 +1076,10 @@ static void append_matching_events(struct sn_monitor *monitor,
                 changed = true;
             }
         }
-        if (monitor->full_decode_enabled && flow_is_telnet(identity)) {
-            const struct sn_full_decode_record *latest = NULL;
+        if ((monitor->full_decode_enabled && flow_is_telnet(identity)) ||
+            (monitor->ssh_header_view_enabled && flow_is_ssh(identity))) {
+            const struct sn_full_decode_record *latest_full = NULL;
+            const struct sn_ssh_header_record *latest_ssh = NULL;
             const struct sn_flow *current_flow = NULL;
 
             for (size_t index = 0U; index < SN_FLOW_TABLE_CAPACITY; ++index) {
@@ -774,23 +1090,44 @@ static void append_matching_events(struct sn_monitor *monitor,
                     break;
                 }
             }
-            for (size_t index = 0U; index < sn_monitor_full_decode_count(monitor); ++index) {
-                const struct sn_full_decode_record *record =
-                    sn_monitor_full_decode_at(monitor, index);
+            if (flow_is_telnet(identity)) {
+                for (size_t index = 0U;
+                     index < sn_monitor_full_decode_count(monitor); ++index) {
+                    const struct sn_full_decode_record *record =
+                        sn_monitor_full_decode_at(monitor, index);
 
-                if (full_decode_record_matches_flow(record, identity)) {
-                    latest = record;
+                    if (full_decode_record_matches_flow(record, identity)) {
+                        latest_full = record;
+                    }
+                }
+            } else {
+                for (size_t index = 0U;
+                     index < sn_monitor_ssh_header_count(monitor); ++index) {
+                    const struct sn_ssh_header_record *record =
+                        sn_monitor_ssh_header_at(monitor, index);
+
+                    if (ssh_header_record_matches_flow(record, identity)) {
+                        latest_ssh = record;
+                    }
                 }
             }
-            if (latest != NULL && current_flow != NULL &&
-                latest->sequence > *seen_full_decode_sequence) {
+            if (((latest_full != NULL &&
+                  latest_full->sequence > *seen_full_decode_sequence) ||
+                 (latest_ssh != NULL &&
+                  latest_ssh->sequence > *seen_full_decode_sequence)) &&
+                current_flow != NULL) {
                 (void)werase(history);
                 for (size_t index = 0U; index < current_flow->decode_history_count; ++index) {
                     append_decode_record(history,
                                          sn_flow_decode_history_at(current_flow, index));
                 }
-                append_full_decode_record(history, latest);
-                *seen_full_decode_sequence = latest->sequence;
+                if (latest_full != NULL) {
+                    append_full_decode_record(history, latest_full);
+                    *seen_full_decode_sequence = latest_full->sequence;
+                } else {
+                    append_ssh_header_record(history, latest_ssh);
+                    *seen_full_decode_sequence = latest_ssh->sequence;
+                }
                 changed = true;
             }
         }
@@ -815,10 +1152,14 @@ static void draw_detail_contents(struct ui_detail_context *context,
                                  uint64_t *seen_full_decode_sequence,
                                  bool load_history)
 {
-    const char *service_a = sn_ui_port_service_name(flow->protocol,
-                                                    flow->endpoints[0].port);
-    const char *service_b = sn_ui_port_service_name(flow->protocol,
-                                                    flow->endpoints[1].port);
+    char endpoint_a_port[6];
+    char endpoint_b_port[6];
+    const char *service_a = flow->dns_session && flow->endpoints[0].port == 0U ?
+        "DNS client" : sn_ui_port_service_name(flow->protocol,
+                                               flow->endpoints[0].port);
+    const char *service_b = flow->dns_session && flow->endpoints[1].port == 0U ?
+        "DNS client" : sn_ui_port_service_name(flow->protocol,
+                                               flow->endpoints[1].port);
 
     if (load_history) {
         (void)werase(history);
@@ -830,17 +1171,22 @@ static void draw_detail_contents(struct ui_detail_context *context,
     }
     (void)werase(panel);
     (void)box(panel, 0, 0);
-    (void)mvwprintw(panel, 1, 2, "%s flow%s", protocol_name(flow->protocol),
+    (void)mvwprintw(panel, 1, 2, "%s%s flow%s", protocol_name(flow->protocol),
+                    flow->dns_session ? " DNS" : "",
+                    flow->tcp_syn_only_no_payload ?
+                        " | SYN ONLY / NO PAYLOAD" :
                     context->monitor->full_decode_enabled && flow_is_telnet(flow) ?
-                        " | FULL TELNET HEX" : "");
-    (void)mvwprintw(panel, 2, 2, "A %u.%u.%u.%u:%u",
+                        " | FULL HEX" :
+                    context->monitor->ssh_header_view_enabled && flow_is_ssh(flow) ?
+                        " | SSH HEADER VIEW" : "");
+    (void)mvwprintw(panel, 2, 2, "A %u.%u.%u.%u:%s",
                     flow->endpoints[0].ipv4[0], flow->endpoints[0].ipv4[1],
                     flow->endpoints[0].ipv4[2], flow->endpoints[0].ipv4[3],
-                    flow->endpoints[0].port);
-    (void)mvwprintw(panel, 3, 2, "B %u.%u.%u.%u:%u",
+                    flow_port_text(flow, 0U, endpoint_a_port));
+    (void)mvwprintw(panel, 3, 2, "B %u.%u.%u.%u:%s",
                     flow->endpoints[1].ipv4[0], flow->endpoints[1].ipv4[1],
                     flow->endpoints[1].ipv4[2], flow->endpoints[1].ipv4[3],
-                    flow->endpoints[1].port);
+                    flow_port_text(flow, 1U, endpoint_b_port));
     (void)mvwprintw(panel, 4, 2, "Services A/B: %s / %s",
                     service_a != NULL ? service_a : "unknown",
                     service_b != NULL ? service_b : "unknown");
@@ -862,6 +1208,8 @@ static void draw_detail_contents(struct ui_detail_context *context,
     if (load_history) {
         (void)append_latest_full_decode(context->monitor, flow, history,
                                         seen_full_decode_sequence);
+        (void)append_latest_ssh_header(context->monitor, flow, history,
+                                       seen_full_decode_sequence);
     }
     if (flow->protocol == 1U && context->payload_inspection_active) {
         for (size_t index = 0U; index < flow->icmp_history_count; ++index) {
@@ -1050,6 +1398,7 @@ static void show_details(struct ui_detail_context *context,
 static void reset_monitor(struct sn_monitor *monitor)
 {
     sn_monitor_clear_full_decode(monitor);
+    sn_monitor_clear_ssh_header_view(monitor);
     sn_flow_table_init(&monitor->flows, monitor->flows.idle_timeout_ns);
     monitor->stats = (struct sn_monitor_stats){0};
     monitor->event_head = 0U;

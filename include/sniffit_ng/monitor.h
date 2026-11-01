@@ -12,6 +12,8 @@
 #define SN_MONITOR_RATE_INTERVAL_NS 3000000000ULL
 #define SN_MONITOR_FULL_DECODE_HISTORY_CAPACITY 8U
 #define SN_MONITOR_FULL_DECODE_PACKET_CAPACITY 65535U
+#define SN_MONITOR_SSH_HEADER_HISTORY_CAPACITY 8U
+#define SN_MONITOR_SSH_HEADER_PACKET_CAPACITY 144U
 
 struct sn_full_decode_record {
     bool active;
@@ -23,6 +25,21 @@ struct sn_full_decode_record {
     size_t wire_length;
     size_t stored_length;
     uint8_t bytes[SN_MONITOR_FULL_DECODE_PACKET_CAPACITY];
+};
+
+struct sn_ssh_header_record {
+    bool active;
+    struct sn_flow_endpoint endpoints[2];
+    uint64_t sequence;
+    struct timeval timestamp;
+    enum sn_packet_link_type link_type;
+    size_t captured_length;
+    size_t wire_length;
+    size_t stored_length;
+    size_t ipv4_offset;
+    size_t ipv4_header_length;
+    size_t tcp_header_length;
+    uint8_t bytes[SN_MONITOR_SSH_HEADER_PACKET_CAPACITY];
 };
 
 struct sn_monitor_stats {
@@ -91,6 +108,12 @@ struct sn_monitor {
     size_t full_decode_count;
     uint64_t full_decode_sequence;
     bool full_decode_enabled;
+    struct sn_ssh_header_record ssh_header_records[
+        SN_MONITOR_SSH_HEADER_HISTORY_CAPACITY];
+    size_t ssh_header_next;
+    size_t ssh_header_count;
+    uint64_t ssh_header_sequence;
+    bool ssh_header_view_enabled;
 };
 
 void sn_monitor_init(struct sn_monitor *monitor, uint64_t idle_timeout_ns);
@@ -104,6 +127,14 @@ void sn_monitor_destroy(struct sn_monitor *monitor);
 size_t sn_monitor_full_decode_count(const struct sn_monitor *monitor);
 
 const struct sn_full_decode_record *sn_monitor_full_decode_at(
+    const struct sn_monitor *monitor,
+    size_t chronological_index);
+
+void sn_monitor_clear_ssh_header_view(struct sn_monitor *monitor);
+
+size_t sn_monitor_ssh_header_count(const struct sn_monitor *monitor);
+
+const struct sn_ssh_header_record *sn_monitor_ssh_header_at(
     const struct sn_monitor *monitor,
     size_t chronological_index);
 

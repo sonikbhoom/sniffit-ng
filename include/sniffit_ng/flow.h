@@ -10,9 +10,11 @@
 
 #define SN_FLOW_TABLE_CAPACITY 256U
 #define SN_FLOW_DEFAULT_IDLE_TIMEOUT_NS 60000000000ULL
+#define SN_FLOW_DNS_IDLE_TIMEOUT_NS 300000000000ULL
 #define SN_FLOW_ICMP_SAMPLE_CAPACITY 256U
 #define SN_FLOW_ICMP_HISTORY_CAPACITY 16U
 #define SN_FLOW_SECURITY_ADVISORY_CAPACITY 160U
+#define SN_FLOW_DEFAULT_DECODE_HISTORY_CAPACITY 16U
 
 struct sn_flow_endpoint {
     uint8_t ipv4[4];
@@ -32,6 +34,8 @@ struct sn_icmp_echo_sample {
 
 struct sn_flow {
     bool active;
+    bool dns_session;
+    bool tcp_syn_only_no_payload;
     uint8_t protocol;
     struct sn_flow_endpoint endpoints[2];
     uint64_t packets[2];

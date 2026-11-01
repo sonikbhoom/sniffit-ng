@@ -1,4 +1,5 @@
 /build/
+/build-*/
 SESSION_TRANSCRIPT_2026-10-10.jsonl
 
 # Do not stage image assets unless the filename explicitly says redacted.

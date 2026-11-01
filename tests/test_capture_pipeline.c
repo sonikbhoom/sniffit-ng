@@ -295,6 +295,94 @@ static void verify_sll_inspection(void)
 }
 #endif
 
+static void verify_ssh_header_pipeline(void)
+{
+    char path_template[] = "/tmp/sniffit-ng-ssh-pipeline-XXXXXX";
+    uint8_t frame[FRAME_LENGTH + 4U] = {0};
+    uint8_t *ip = frame + ETHERNET_LENGTH;
+    uint8_t *tcp = ip + IPV4_LENGTH;
+    char error[256] = {0};
+    enum sn_decoder_mode modes[SN_DECODER_MODULE_COUNT] = {0};
+    struct sn_capture_packet packet;
+    struct sn_capture *capture;
+    struct sn_monitor *monitor = calloc(1U, sizeof(*monitor));
+    pcap_t *dead_capture;
+    pcap_dumper_t *dumper;
+    int descriptor = mkstemp(path_template);
+
+    assert(monitor != NULL);
+    assert(descriptor >= 0);
+    assert(close(descriptor) == 0);
+    write_be16(frame + 12U, 0x0800U);
+    ip[0] = 0x45U;
+    write_be16(ip + 2U, IPV4_LENGTH + TCP_LENGTH + 4U);
+    ip[8] = 64U;
+    ip[9] = 6U;
+    ip[12] = 192U;
+    ip[15] = 1U;
+    ip[16] = 192U;
+    ip[19] = 2U;
+    write_be16(tcp, 40000U);
+    write_be16(tcp + 2U, 22U);
+    tcp[12] = 0x50U;
+    frame[FRAME_LENGTH] = 0xdeU;
+    frame[FRAME_LENGTH + 1U] = 0xadU;
+    frame[FRAME_LENGTH + 2U] = 0xbeU;
+    frame[FRAME_LENGTH + 3U] = 0xefU;
+
+    dead_capture = pcap_open_dead(DLT_EN10MB, (int)sizeof(frame));
+    assert(dead_capture != NULL);
+    dumper = pcap_dump_open(dead_capture, path_template);
+    assert(dumper != NULL);
+    dump_packet(dumper, frame, sizeof(frame), sizeof(frame), 20L);
+    dump_packet(dumper, frame, FRAME_LENGTH - 1U, sizeof(frame), 21L);
+    tcp[12] = 0x40U;
+    dump_packet(dumper, frame, sizeof(frame), sizeof(frame), 22L);
+    tcp[12] = 0x50U;
+    assert(pcap_dump_flush(dumper) == 0);
+    pcap_dump_close(dumper);
+    pcap_close(dead_capture);
+
+    capture = sn_capture_open_offline(path_template, error, sizeof(error));
+    assert(capture != NULL);
+    sn_monitor_init(monitor, 10000000000ULL);
+    modes[SN_DECODER_SSH] = SN_DECODER_RAW;
+    sn_monitor_set_decode_options(monitor, false, false, modes);
+    assert(monitor->ssh_header_view_enabled);
+    assert(sn_capture_next(capture, &packet, error, sizeof(error)) ==
+           SN_CAPTURE_PACKET);
+    assert(sn_monitor_process(monitor, &packet) == SN_MONITOR_PROCESSED);
+    assert(sn_monitor_ssh_header_count(monitor) == 1U);
+    {
+        const struct sn_ssh_header_record *record =
+            sn_monitor_ssh_header_at(monitor, 0U);
+
+        assert(record != NULL && record->active);
+        assert(record->sequence == 1U);
+        assert(record->timestamp.tv_sec == 20L);
+        assert(record->link_type == SN_PACKET_LINK_ETHERNET);
+        assert(record->captured_length == sizeof(frame));
+        assert(record->wire_length == sizeof(frame));
+        assert(record->stored_length == FRAME_LENGTH);
+        assert(memcmp(record->bytes, frame, FRAME_LENGTH) == 0);
+    }
+    assert(sn_capture_next(capture, &packet, error, sizeof(error)) ==
+           SN_CAPTURE_PACKET);
+    assert(sn_monitor_process(monitor, &packet) == SN_MONITOR_TRUNCATED);
+    assert(sn_monitor_ssh_header_count(monitor) == 1U);
+    assert(sn_capture_next(capture, &packet, error, sizeof(error)) ==
+           SN_CAPTURE_PACKET);
+    assert(sn_monitor_process(monitor, &packet) == SN_MONITOR_MALFORMED);
+    assert(sn_monitor_ssh_header_count(monitor) == 1U);
+    assert(sn_flow_table_count(&monitor->flows) == 1U);
+    assert(sn_capture_next(capture, &packet, error, sizeof(error)) == SN_CAPTURE_EOF);
+
+    sn_monitor_destroy(monitor);
+    free(monitor);
+    sn_capture_close(capture);
+    assert(unlink(path_template) == 0);
+}
+
 int main(void)
 {
     char path[80];
@@ -465,6 +553,7 @@ int main(void)
 #ifdef DLT_LINUX_SLL
     verify_sll_inspection();
 #endif
+    verify_ssh_header_pipeline();
     puts("capture pipeline tests passed");
     return 0;
 }

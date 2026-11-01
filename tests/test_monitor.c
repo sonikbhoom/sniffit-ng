@@ -139,6 +139,40 @@ static void test_capture_to_flow_events(void)
     assert(!sn_monitor_next_event(&monitor, &event));
 }
 
+static void test_ssh_raw_history_stores_headers_but_not_payload(void)
+{
+    struct sn_monitor monitor;
+    struct sn_ssh_header_record const *record;
+    enum sn_decoder_mode modes[SN_DECODER_MODULE_COUNT] = {0};
+    uint8_t frame[FRAME_LENGTH + 4U];
+    struct sn_capture_packet packet;
+    uint8_t *ip;
+
+    make_tcp_frame(frame, 1U, 40000U, 2U, 22U);
+    ip = frame + ETHERNET_LENGTH;
+    write_be16(ip + 2U, IPV4_LENGTH + TCP_LENGTH + 4U);
+    frame[FRAME_LENGTH] = 0xdeU;
+    frame[FRAME_LENGTH + 1U] = 0xadU;
+    frame[FRAME_LENGTH + 2U] = 0xbeU;
+    frame[FRAME_LENGTH + 3U] = 0xefU;
+    packet = capture_packet(frame, sizeof(frame), 100L);
+
+    modes[SN_DECODER_SSH] = SN_DECODER_RAW;
+    sn_monitor_init(&monitor, UINT64_MAX);
+    sn_monitor_set_decode_options(&monitor, false, false, modes);
+    assert(monitor.ssh_header_view_enabled);
+    assert(sn_monitor_process(&monitor, &packet) == SN_MONITOR_PROCESSED);
+    assert(sn_monitor_ssh_header_count(&monitor) == 1U);
+
+    record = sn_monitor_ssh_header_at(&monitor, 0U);
+    assert(record != NULL);
+    assert(record->captured_length == sizeof(frame));
+    assert(record->stored_length == FRAME_LENGTH);
+    assert(record->stored_length == ETHERNET_LENGTH + IPV4_LENGTH + TCP_LENGTH);
+    assert(memcmp(record->bytes, frame, record->stored_length) == 0);
+    sn_monitor_destroy(&monitor);
+}
+
 static void test_reject_bad_frames_without_flow_events(void)
 {
     struct sn_monitor monitor;
@@ -345,6 +379,7 @@ static void test_three_second_rate_sampling_and_reset(void)
 int main(void)
 {
     test_capture_to_flow_events();
+    test_ssh_raw_history_stores_headers_but_not_payload();
     test_reject_bad_frames_without_flow_events();
     test_igmp_and_vrrp_capture_to_decoded_flows();
     test_unknown_protocol_raw_flow_is_opt_in_and_metadata_only();

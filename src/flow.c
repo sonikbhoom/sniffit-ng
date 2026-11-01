@@ -6,6 +6,7 @@
 
 struct flow_key {
     uint8_t protocol;
+    bool dns_session;
     struct sn_flow_endpoint endpoints[2];
     unsigned int direction;
 };
@@ -35,6 +36,7 @@ static int compare_endpoints(const struct sn_flow_endpoint *left,
 static bool flow_matches(const struct sn_flow *flow, const struct flow_key *key)
 {
     return flow->active && flow->protocol == key->protocol &&
+           flow->dns_session == key->dns_session &&
            compare_endpoints(&flow->endpoints[0], &key->endpoints[0]) == 0 &&
            compare_endpoints(&flow->endpoints[1], &key->endpoints[1]) == 0;
 }
@@ -70,8 +72,15 @@ static enum sn_flow_update_result make_flow_key(
     memcpy(key->endpoints[0].ipv4, packet->source_ipv4, sizeof(key->endpoints[0].ipv4));
     memcpy(key->endpoints[1].ipv4, packet->destination_ipv4,
            sizeof(key->endpoints[1].ipv4));
-    key->endpoints[0].port = source_port;
-    key->endpoints[1].port = destination_port;
+    key->dns_session = packet->protocol == 17U &&
+                       (source_port == 53U || destination_port == 53U);
+    if (key->dns_session) {
+        key->endpoints[0].port = source_port == 53U ? 53U : 0U;
+        key->endpoints[1].port = destination_port == 53U ? 53U : 0U;
+    } else {
+        key->endpoints[0].port = source_port;
+        key->endpoints[1].port = destination_port;
+    }
     key->direction = 0U;
 
     if (compare_endpoints(&key->endpoints[0], &key->endpoints[1]) > 0) {
@@ -91,6 +100,26 @@ static void increment_saturated(uint64_t *value, uint64_t amount)
     } else {
         *value += amount;
     }
+}
+
+static size_t decode_history_capacity(const struct sn_flow *flow)
+{
+    return flow->dns_session ? SN_FLOW_DECODE_HISTORY_CAPACITY :
+                               SN_FLOW_DEFAULT_DECODE_HISTORY_CAPACITY;
+}
+
+static bool packet_is_header_only_tcp_syn(const struct sn_packet_view *packet)
+{
+    const uint8_t disqualifying_flags = 0x3dU;
+    uint8_t flags;
+
+    if (packet == NULL || packet->protocol != 6U ||
+        !packet->transport_header_present || packet->transport == NULL ||
+        packet->transport_length < 20U || packet->payload_length != 0U) {
+        return false;
+    }
+    flags = packet->transport[13];
+    return (flags & 0x02U) != 0U && (flags & disqualifying_flags) == 0U;
 }
 
 void sn_flow_table_init(struct sn_flow_table *table, uint64_t idle_timeout_ns)
@@ -163,9 +192,14 @@ enum sn_flow_update_result sn_flow_table_update(
 
     for (size_t index = 0U; index < SN_FLOW_TABLE_CAPACITY; ++index) {
         struct sn_flow *entry = &table->entries[index];
+        uint64_t idle_timeout_ns = table->idle_timeout_ns;
 
+        if (entry->dns_session &&
+            idle_timeout_ns < SN_FLOW_DNS_IDLE_TIMEOUT_NS) {
+            idle_timeout_ns = SN_FLOW_DNS_IDLE_TIMEOUT_NS;
+        }
         if (entry->active && timestamp_ns >= entry->last_seen_ns &&
-            timestamp_ns - entry->last_seen_ns >= table->idle_timeout_ns) {
+            timestamp_ns - entry->last_seen_ns >= idle_timeout_ns) {
             entry->active = false;
         }
         if (flow_matches(entry, &key)) {
@@ -193,9 +227,14 @@ enum sn_flow_update_result sn_flow_table_update(
     if (creating) {
         *slot = (struct sn_flow){0};
         slot->active = true;
+        slot->dns_session = key.dns_session;
+        slot->tcp_syn_only_no_payload = packet_is_header_only_tcp_syn(packet);
         slot->protocol = key.protocol;
         slot->endpoints[0] = key.endpoints[0];
         slot->endpoints[1] = key.endpoints[1];
+    } else if (slot->tcp_syn_only_no_payload &&
+               !packet_is_header_only_tcp_syn(packet)) {
+        slot->tcp_syn_only_no_payload = false;
     }
 
     increment_saturated(&slot->packets[key.direction], 1U);
@@ -218,10 +257,12 @@ enum sn_flow_update_result sn_flow_table_update(
                           table->decoder_modes)) {
             struct sn_packet_decode_record *record =
                 &slot->decode_history[slot->decode_history_next];
+            size_t history_capacity = decode_history_capacity(slot);
+
             (void)snprintf(record->text, sizeof(record->text), "%s", decoded);
             slot->decode_history_next =
-                (slot->decode_history_next + 1U) % SN_FLOW_DECODE_HISTORY_CAPACITY;
-            if (slot->decode_history_count < SN_FLOW_DECODE_HISTORY_CAPACITY) {
+                (slot->decode_history_next + 1U) % history_capacity;
+            if (slot->decode_history_count < history_capacity) {
                 ++slot->decode_history_count;
             }
         }
@@ -297,12 +338,14 @@ const struct sn_packet_decode_record *sn_flow_decode_history_at(
     size_t chronological_index)
 {
     size_t oldest_index;
+    size_t history_capacity;
 
     if (flow == NULL || chronological_index >= flow->decode_history_count) {
         return NULL;
     }
-    oldest_index = (flow->decode_history_next + SN_FLOW_DECODE_HISTORY_CAPACITY -
-                    flow->decode_history_count) % SN_FLOW_DECODE_HISTORY_CAPACITY;
+    history_capacity = decode_history_capacity(flow);
+    oldest_index = (flow->decode_history_next + history_capacity -
+                    flow->decode_history_count) % history_capacity;
     return &flow->decode_history[(oldest_index + chronological_index) %
-                                 SN_FLOW_DECODE_HISTORY_CAPACITY];
+                                 history_capacity];
 }

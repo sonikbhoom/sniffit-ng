@@ -113,15 +113,29 @@ void sn_monitor_clear_full_decode(struct sn_monitor *monitor)
     monitor->full_decode_sequence = 0U;
 }
 
+void sn_monitor_clear_ssh_header_view(struct sn_monitor *monitor)
+{
+    if (monitor == NULL) {
+        return;
+    }
+    memset(monitor->ssh_header_records, 0,
+           sizeof(monitor->ssh_header_records));
+    monitor->ssh_header_next = 0U;
+    monitor->ssh_header_count = 0U;
+    monitor->ssh_header_sequence = 0U;
+}
+
 void sn_monitor_destroy(struct sn_monitor *monitor)
 {
     if (monitor == NULL) {
         return;
     }
     sn_monitor_clear_full_decode(monitor);
+    sn_monitor_clear_ssh_header_view(monitor);
     free(monitor->full_decode_records);
     monitor->full_decode_records = NULL;
     monitor->full_decode_enabled = false;
+    monitor->ssh_header_view_enabled = false;
 }
 
 size_t sn_monitor_full_decode_count(const struct sn_monitor *monitor)
@@ -144,6 +158,28 @@ const struct sn_full_decode_record *sn_monitor_full_decode_at(
               monitor->full_decode_count) % SN_MONITOR_FULL_DECODE_HISTORY_CAPACITY;
     return &monitor->full_decode_records[
         (oldest + chronological_index) % SN_MONITOR_FULL_DECODE_HISTORY_CAPACITY];
+}
+
+size_t sn_monitor_ssh_header_count(const struct sn_monitor *monitor)
+{
+    return monitor == NULL ? 0U : monitor->ssh_header_count;
+}
+
+const struct sn_ssh_header_record *sn_monitor_ssh_header_at(
+    const struct sn_monitor *monitor,
+    size_t chronological_index)
+{
+    size_t oldest;
+
+    if (monitor == NULL ||
+        chronological_index >= monitor->ssh_header_count) {
+        return NULL;
+    }
+    oldest = (monitor->ssh_header_next +
+              SN_MONITOR_SSH_HEADER_HISTORY_CAPACITY -
+              monitor->ssh_header_count) % SN_MONITOR_SSH_HEADER_HISTORY_CAPACITY;
+    return &monitor->ssh_header_records[
+        (oldest + chronological_index) % SN_MONITOR_SSH_HEADER_HISTORY_CAPACITY];
 }
 
 static void store_full_decode_record(struct sn_monitor *monitor,
@@ -197,6 +233,74 @@ static void store_full_decode_record(struct sn_monitor *monitor,
     }
 }
 
+static void store_ssh_header_record(struct sn_monitor *monitor,
+                                    const struct sn_capture_packet *packet,
+                                    const struct sn_packet_view *view,
+                                    const struct sn_flow *flow)
+{
+    struct sn_ssh_header_record *record;
+    size_t ipv4_offset;
+    size_t tcp_header_length;
+    size_t stored_length;
+    uint16_t source_port;
+    uint16_t destination_port;
+
+    if (!monitor->ssh_header_view_enabled || view->protocol != 6U ||
+        !view->transport_header_present || view->transport == NULL ||
+        view->transport_length < 20U || view->ipv4_packet == NULL || flow == NULL) {
+        return;
+    }
+    source_port = (uint16_t)(((uint16_t)view->transport[0] << 8) |
+                             view->transport[1]);
+    destination_port = (uint16_t)(((uint16_t)view->transport[2] << 8) |
+                                  view->transport[3]);
+    if (source_port != 22U && destination_port != 22U) {
+        return;
+    }
+
+    tcp_header_length = (size_t)(view->transport[12] >> 4) * 4U;
+    if (tcp_header_length < 20U || tcp_header_length > 60U ||
+        tcp_header_length > view->transport_length) {
+        return;
+    }
+    ipv4_offset = (size_t)(view->ipv4_packet - packet->data);
+    if (ipv4_offset > 24U || ipv4_offset > packet->captured_length ||
+        view->ipv4_header_length > packet->captured_length - ipv4_offset ||
+        tcp_header_length > packet->captured_length - ipv4_offset -
+                                view->ipv4_header_length) {
+        return;
+    }
+    stored_length = ipv4_offset + view->ipv4_header_length + tcp_header_length;
+    if (stored_length > SN_MONITOR_SSH_HEADER_PACKET_CAPACITY) {
+        return;
+    }
+
+    record = &monitor->ssh_header_records[monitor->ssh_header_next];
+    memset(record, 0, sizeof(*record));
+    record->active = true;
+    record->endpoints[0] = flow->endpoints[0];
+    record->endpoints[1] = flow->endpoints[1];
+    if (monitor->ssh_header_sequence < UINT64_MAX) {
+        ++monitor->ssh_header_sequence;
+    }
+    record->sequence = monitor->ssh_header_sequence;
+    record->timestamp = packet->timestamp;
+    record->link_type = packet->link_type;
+    record->captured_length = packet->captured_length;
+    record->wire_length = packet->wire_length;
+    record->stored_length = stored_length;
+    record->ipv4_offset = ipv4_offset;
+    record->ipv4_header_length = view->ipv4_header_length;
+    record->tcp_header_length = tcp_header_length;
+    memcpy(record->bytes, packet->data, stored_length);
+
+    monitor->ssh_header_next =
+        (monitor->ssh_header_next + 1U) % SN_MONITOR_SSH_HEADER_HISTORY_CAPACITY;
+    if (monitor->ssh_header_count < SN_MONITOR_SSH_HEADER_HISTORY_CAPACITY) {
+        ++monitor->ssh_header_count;
+    }
+}
+
 void sn_monitor_set_payload_inspection(struct sn_monitor *monitor, bool enabled)
 {
     if (monitor != NULL) {
@@ -213,6 +317,12 @@ void sn_monitor_set_decode_options(struct sn_monitor *monitor,
     if (monitor != NULL) {
         sn_flow_table_set_decode_options(&monitor->flows, show_raw_flows,
                                          tainted_extensions, modes);
+        if (modes != NULL && modes[SN_DECODER_SSH] == SN_DECODER_RAW) {
+            monitor->ssh_header_view_enabled = true;
+        } else {
+            sn_monitor_clear_ssh_header_view(monitor);
+            monitor->ssh_header_view_enabled = false;
+        }
     }
 }
 
@@ -358,6 +468,7 @@ enum sn_monitor_result sn_monitor_process(
     }
 
     store_full_decode_record(monitor, packet, &view, flow);
+    store_ssh_header_record(monitor, packet, &view, flow);
 
     switch (flow_result) {
     case SN_FLOW_CREATED:
