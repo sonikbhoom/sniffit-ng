@@ -125,6 +125,7 @@ This is the canonical list of open project work. Add newly agreed TODOs here und
 | Status | Task |
 | --- | --- |
 | [ ] | Choose ICMP detail row width at startup from the terminal dimensions, using the available pane width while preserving aligned offsets and ASCII; define a readable fallback for narrow terminals. |
+| [ ] | Keep the selected flow's inspection/detail window updating continuously. Coalesce or throttle refreshes of the background connection list and traffic counts to reduce UI work, but insert newly observed sessions promptly and rank them as second priority: below configured UI-priority flows and above ordinary sessions. Preserve accurate counters in the model, selection stability, and deterministic ordering; cover responsiveness and ordering with PTY tests under sustained event load. |
 | [ ] | Add quick local/remote port and selected-flow filters. Protocol filtering is available on key `5`; `r` resets monitor state and clears active display filters. Clearly distinguish display-only filtering from capture filtering. |
 | [ ] | Add a focus mode for the selected flow or either endpoint host, with a shortcut to apply and clear focus; keep it distinct from source/destination filters and cover it with PTY interaction tests. |
 | [ ] | Improve terminal accessibility: provide text cues in addition to color for local and priority flows, add a useful narrow-terminal fallback below 80x18, and test monochrome, low-color, resize, and screen-reader behavior where supported. |

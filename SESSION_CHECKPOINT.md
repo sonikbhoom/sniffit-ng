@@ -49,7 +49,7 @@ Remote: `https://github.com/sonikbhoom/sniffit-ng.git`
 - `SESSION_TRANSCRIPT_2026-10-10.jsonl` is a local copy of the Copilot chat transcript and is excluded from Git because it may include private conversation and machine/network details.
 - Do not stage or publish the raw transcript without explicit review and consent.
 
-## Handoff Checkpoint — 2026-10-11
+## Handoff Checkpoint — 2026-10-11 (historical; superseded by the 2026-11-01 checkpoint below)
 
 The user paused work for today. Do not continue implementation, rebuild, run capture, or roll back unless they ask to resume. They may later request a rollback to the last state where Telnet decode presentation was working; no commit or clean rollback point has been created, so preserve all current edits and identify the desired baseline before reverting anything.
 
@@ -81,3 +81,24 @@ A root cron job samples every `sniffit-ng` process (CPU, memory, fds, host load)
 6. Optional: delete `scripts/sniffit-ng-perf.sh` from this repo, or keep it for future runs.
 
 Re-installing after a script change needs `sudo install -o root -g root -m 0755 scripts/sniffit-ng-perf.sh /usr/local/sbin/sniffit-ng-perf.sh`.
+
+## Checkpoint — 2026-11-01
+
+Supersedes the 2026-10-11 handoff: the dirty worktree described there was committed and published, and work has resumed.
+
+### Repository State
+
+- `main` at `6c9aaa2`, in sync with `origin/main` (`https://github.com/sonikbhoom/sniffit-ng.git`). The work in progress in the Oct 11 handoff (SSH decoder `src/decode_ssh.c`, decoder modes, monitor/UI changes, `scripts/sniffit-ng-perf.sh`, `1-day-logging.md`) landed in `c564904`. The stray `&&qq` token noted earlier is no longer present in `src/decode_ssh.c`.
+- `c564904`: UDP DNS flows between the same address pair now share one long-lived flow (client port shown as `*`, 32 retained decoded messages, 5 minute idle window, `dns_session` flow flag), plus `.github/copilot-instructions.md`. `struct sn_monitor` is about 5 MB and `struct sn_flow` about 13 KB, so never place a monitor on the stack (the capture pipeline test heap-allocates it).
+- `6c9aaa2`: new `hide_protocol` config key (default `icmp`; accepts `tcp`, `udp`, `icmp`, `igmp`, `vrrp`; `hide_protocol =` hides nothing). Hidden protocols are omitted from the default list. Key `5` with a protocol shows only it, with `all` shows every protocol including hidden ones, and `r` (reset) restores the configured hiding. The Telnet full-decode title is `FULL DECODE`; the PTY test was updated to match.
+- Validation: `build/` full CTest 19 tests, 18 passed, live-loopback skipped without `CAP_NET_RAW`.
+
+### Multi-Machine Source Management
+
+- The long-term stability test machine `tomahawk` had a working copy at `22b0cd0` with uncommitted edits. An rsync copy was analyzed at `~/src/sniffit/sniffit-ng-tomahawk`. Its modified files were either identical to `c564904` or older versions of files since rewritten, so nothing there needs preserving except one `PLAN.md` row (the continuous detail-window refresh and new-session ranking task, now in `PLAN.md`).
+- To update tomahawk safely: `git stash push -u -m tomahawk-pre-pull`, then `git pull --ff-only`. Do not `git stash pop`; it conflicts and would reintroduce the older DNS/history code.
+- The performance monitor reminder above still applies on any machine where the cron job was installed.
+
+### Next Work
+
+Items 1-8 in the earlier Next Work list remain open, plus the new `PLAN.md` interface task for continuous detail-window refresh with prompt second-priority placement of new sessions. Resolve the Oct 11 Telnet/SSH full-decode appearance issue against the live UI before treating it as fixed.
