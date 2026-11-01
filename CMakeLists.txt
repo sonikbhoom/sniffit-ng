@@ -154,6 +154,10 @@ target_link_libraries(sniffit-ng PRIVATE
 install(TARGETS sniffit-ng
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+install(PROGRAMS scripts/sniffit-ng-scanmap.py
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+    RENAME sniffit-ng-scanmap
+)
 install(FILES README.md
     DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/sniffit-ng
 )
@@ -425,10 +429,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(CPACK_RPM_PACKAGE_RELEASE "1")
     set(CPACK_RPM_PACKAGE_LICENSE "NOASSERTION")
     set(CPACK_RPM_PACKAGE_AUTOREQPROV ON)
+    set(CPACK_RPM_PACKAGE_REQUIRES "python3")
     set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Sniffit NG maintainers")
     set(CPACK_DEBIAN_PACKAGE_SECTION "net")
     set(CPACK_DEBIAN_PACKAGE_DEPENDS
-        "libc6, libncursesw6, libtinfo6, libpcap0.8 | libpcap0.8t64, libcurl4 | libcurl4t64")
+        "libc6, libncursesw6, libtinfo6, libpcap0.8 | libpcap0.8t64, libcurl4 | libcurl4t64, python3")
     set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 else()
     set(CPACK_GENERATOR "TGZ")

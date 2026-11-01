@@ -151,7 +151,7 @@ Set `priority_log = /absolute/path.jsonl` to append one JSON line for every TCP/
 {"ts":"2026-11-01T21:12:05.959Z","proto":"tcp","src":"203.0.113.9","sport":40000,"dst":"192.0.2.10","dport":22,"flags":"S","len":40}
 ```
 
-Timestamps are ISO 8601 UTC. Analyze the log offline with `scripts/sniffit-ng-scanmap.py LOG... -o map.geojson` (Python 3 standard library only). Rotated files (`LOG.1`, `LOG.2`, ...) next to each named log are included automatically; use `--no-rotated` to read only the named files. It groups sources, labels them `probe` or `sustained` (`--sustained-packets`), and writes GeoJSON. By default it makes no network requests. `--lookup rdap|ipwhois|all` sends public source IPs to rdap.org and ipwho.is after a confirmation (`--yes` to skip), with caching, rate limiting and `--max-lookups`. Source addresses can be spoofed, and geolocation is approximate.
+Timestamps are ISO 8601 UTC. Analyze the log offline with `sniffit-ng-scanmap LOG...` (installed by the package; `scripts/sniffit-ng-scanmap.py` in the source tree) -o map.geojson` (Python 3 standard library only). Rotated files (`LOG.1`, `LOG.2`, ...) next to each named log are included automatically; use `--no-rotated` to read only the named files. It groups sources, labels them `probe` or `sustained` (`--sustained-packets`), and writes GeoJSON. By default it makes no network requests. `--lookup rdap|ipwhois|all` sends public source IPs to rdap.org and ipwho.is after a confirmation (`--yes` to skip), with caching, rate limiting and `--max-lookups`. Source addresses can be spoofed, and geolocation is approximate.
 
 ### Decoder Modes and Extensions
 
