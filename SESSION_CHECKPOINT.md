@@ -36,7 +36,7 @@ Remote: `https://github.com/sonikbhoom/sniffit-ng.git`
 ## Next Work
 
 1. Keep packet generation out of scope; reconsider it only if a concrete authorized test-network need is documented and explicitly approved.
-2. Run multi-day soak tests for resource/counter stability and decide whether idle-flow expiry needs a timer independent of packet arrival.
+2. Restart and complete a multi-day soak. The planned soak failed when the terminal application crashed; the old test data was removed, so its coverage and failure details cannot be recovered and it is not evidence of stability. Record the exact build/config, process restarts, resource samples, and crash/UI logs on the new run; decide whether idle-flow expiry needs a timer independent of packet arrival.
 3. Expand corpus-backed fuzzing, malformed-pcap coverage, privilege/capability testing, and accessibility/PTY coverage.
 4. Prioritize terminal accessibility (text cues, narrow layouts, monochrome/low-vision behavior) and validate before making broad accessibility claims.
 5. Decide on a project license and obtain qualified legal review before broad distribution.
