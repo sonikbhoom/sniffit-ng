@@ -22,17 +22,17 @@ struct ui_detail_context {
     size_t flow_count;
     size_t *selected;
     size_t *scroll_start;
-    bool show_stats;
+    bool *show_stats;
     bool colors_enabled;
     bool recording_active;
     bool payload_inspection_active;
     bool *capture_polling;
     const char **capture_status;
-    const struct sn_monitor_rates *rates;
 };
 
 enum {
     UI_DETAIL_HISTORY_LINES = 8192,
+    UI_BACKGROUND_REFRESH_INTERVAL_NS = 1000000000U,
     UI_COLOR_SSH_TELNET = 1,
     UI_COLOR_LOCAL_ADDRESS
 };
@@ -202,8 +202,8 @@ static void draw_screen(struct sn_monitor *monitor,
                         bool recording_active,
                         bool payload_inspection_active,
                         const char *capture_status,
-                        const struct sn_monitor_rates *rates,
-                        bool colors_enabled)
+                        bool colors_enabled,
+                        bool defer_refresh)
 {
     char title[256] = "Sniffit NG | Network monitor";
     size_t local_address_start = SIZE_MAX;
@@ -222,7 +222,11 @@ static void draw_screen(struct sn_monitor *monitor,
     if (COLS < 80 || LINES < 18) {
         mvaddstr(0, 0, "Sniffit NG needs a terminal at least 80 columns by 18 rows.");
         mvaddstr(2, 0, "Resize the terminal, or press q to quit.");
-        refresh();
+        if (defer_refresh) {
+            (void)wnoutrefresh(stdscr);
+        } else {
+            (void)refresh();
+        }
         return;
     }
 
@@ -323,31 +327,17 @@ static void draw_screen(struct sn_monitor *monitor,
     if (show_stats) {
         int stats_row = LINES - 11;
         mvhline(stats_row - 1, 0, ACS_HLINE, COLS);
-        if (rates != NULL) {
-            mvprintw(stats_row, 0, "Packets/sec: IP %llu  TCP %llu  UDP %llu  ICMP %llu",
-                     (unsigned long long)rates->ipv4_packets_per_second,
-                     (unsigned long long)rates->tcp_packets_per_second,
-                     (unsigned long long)rates->udp_packets_per_second,
-                     (unsigned long long)rates->icmp_packets_per_second);
-            mvprintw(stats_row + 1, 0, "Bytes/sec: TCP %llu  UDP %llu",
-                     (unsigned long long)rates->tcp_bytes_per_second,
-                     (unsigned long long)rates->udp_bytes_per_second);
-            mvprintw(stats_row + 2, 0, "IGMP/sec: %llu  VRRP/sec: %llu",
-                     (unsigned long long)rates->igmp_packets_per_second,
-                     (unsigned long long)rates->vrrp_packets_per_second);
-        } else {
-            mvprintw(stats_row, 0, "Packet totals: IP %llu  TCP %llu  UDP %llu  ICMP %llu",
-                     (unsigned long long)monitor->stats.ipv4_packets,
-                     (unsigned long long)monitor->stats.tcp_packets,
-                     (unsigned long long)monitor->stats.udp_packets,
-                     (unsigned long long)monitor->stats.icmp_packets);
-            mvprintw(stats_row + 1, 0, "Packet totals: IGMP %llu  VRRP %llu",
-                     (unsigned long long)monitor->stats.igmp_packets,
-                     (unsigned long long)monitor->stats.vrrp_packets);
-            mvprintw(stats_row + 2, 0, "Byte totals: TCP %llu  UDP %llu",
-                     (unsigned long long)monitor->stats.tcp_bytes,
-                     (unsigned long long)monitor->stats.udp_bytes);
-        }
+        mvprintw(stats_row, 0, "Packet totals: IP %llu  TCP %llu  UDP %llu  ICMP %llu",
+                 (unsigned long long)monitor->stats.ipv4_packets,
+                 (unsigned long long)monitor->stats.tcp_packets,
+                 (unsigned long long)monitor->stats.udp_packets,
+                 (unsigned long long)monitor->stats.icmp_packets);
+        mvprintw(stats_row + 1, 0, "Packet totals: IGMP %llu  VRRP %llu",
+                 (unsigned long long)monitor->stats.igmp_packets,
+                 (unsigned long long)monitor->stats.vrrp_packets);
+        mvprintw(stats_row + 2, 0, "Byte totals: TCP %llu  UDP %llu",
+                 (unsigned long long)monitor->stats.tcp_bytes,
+                 (unsigned long long)monitor->stats.udp_bytes);
         mvprintw(stats_row + 3, 0, "Truncated: %llu  Malformed: %llu  Unsupported: %llu  Dropped UI events: %llu",
                  (unsigned long long)monitor->stats.truncated_packets,
                  (unsigned long long)monitor->stats.malformed_packets,
@@ -365,7 +355,11 @@ static void draw_screen(struct sn_monitor *monitor,
     }
     clrtoeol();
     attroff(A_REVERSE);
-    refresh();
+    if (defer_refresh) {
+        (void)wnoutrefresh(stdscr);
+    } else {
+        (void)refresh();
+    }
 }
 
 static bool read_line(const char *prompt, char *buffer, size_t capacity,
@@ -1238,8 +1232,8 @@ static void draw_detail_contents(struct ui_detail_context *context,
 static void redraw_detail_background(struct ui_detail_context *context,
                                      const struct sn_flow *preferred_flow)
 {
-    size_t visible_rows = LINES > (context->show_stats ? 14 : 5) ?
-        (size_t)(LINES - (context->show_stats ? 14 : 5)) : 1U;
+    size_t visible_rows = LINES > (*context->show_stats ? 14 : 5) ?
+        (size_t)(LINES - (*context->show_stats ? 14 : 5)) : 1U;
 
     context->flow_count = collect_flows(context->monitor, context->filter,
                                         context->flows, context->priority_ports,
@@ -1269,9 +1263,9 @@ static void draw_detail_background(struct ui_detail_context *context)
     draw_screen(context->monitor, context->network_info, context->filter, context->flows,
                 context->priority_ports, context->priority_count,
                 context->flow_count, *context->selected, *context->scroll_start,
-                context->show_stats, context->recording_active,
+                *context->show_stats, context->recording_active,
                 context->payload_inspection_active, *context->capture_status,
-                context->rates, context->colors_enabled);
+                context->colors_enabled, true);
 }
 
 static void show_details(struct ui_detail_context *context,
@@ -1287,6 +1281,7 @@ static void show_details(struct ui_detail_context *context,
     size_t seen_decode_count = 0U;
     size_t seen_decode_next = 0U;
     uint64_t seen_full_decode_sequence = 0U;
+    uint64_t last_background_refresh_ns = monotonic_time_ns();
     WINDOW *panel = newwin(LINES, panel_width, 0, panel_x);
     WINDOW *history = newpad(UI_DETAIL_HISTORY_LINES, history_width);
     int key;
@@ -1321,20 +1316,28 @@ static void show_details(struct ui_detail_context *context,
                                            &seen_count, &seen_next,
                                            &seen_decode_count, &seen_decode_next,
                                            &seen_full_decode_sequence, panel_x);
-                    redraw_detail_background(context, &identity);
-                    draw_detail_background(context);
-                    if (context->flow_count > 0U) {
-                        const struct sn_flow *highlighted =
-                            context->flows[*context->selected];
-                        bool focus_changed = !same_flow_identity(&identity, highlighted);
+                }
+                if (*context->capture_polling) {
+                    uint64_t now_ns = monotonic_time_ns();
+                    if (now_ns - last_background_refresh_ns >=
+                        UI_BACKGROUND_REFRESH_INTERVAL_NS) {
+                        redraw_detail_background(context, &identity);
+                        draw_detail_background(context);
+                        if (context->flow_count > 0U) {
+                            const struct sn_flow *highlighted =
+                                context->flows[*context->selected];
+                            bool focus_changed =
+                                !same_flow_identity(&identity, highlighted);
 
-                        identity = *highlighted;
-                        draw_detail_contents(context, &identity, panel, history, panel_x,
-                                             &seen_count, &seen_next,
-                                             &seen_decode_count, &seen_decode_next,
-                                             &seen_full_decode_sequence,
-                                             focus_changed);
-                        refresh_detail_panel(panel, history, panel_x);
+                            identity = *highlighted;
+                            draw_detail_contents(context, &identity, panel, history,
+                                                 panel_x, &seen_count, &seen_next,
+                                                 &seen_decode_count, &seen_decode_next,
+                                                 &seen_full_decode_sequence,
+                                                 focus_changed);
+                            refresh_detail_panel(panel, history, panel_x);
+                        }
+                        last_background_refresh_ns = now_ns;
                     }
                 }
             }
@@ -1354,6 +1357,19 @@ static void show_details(struct ui_detail_context *context,
                                  &seen_decode_count, &seen_decode_next,
                                  &seen_full_decode_sequence, false);
             refresh_detail_panel(panel, history, panel_x);
+            last_background_refresh_ns = monotonic_time_ns();
+            continue;
+        }
+        if (key == 'n' || key == 'N') {
+            *context->show_stats = !*context->show_stats;
+            redraw_detail_background(context, &identity);
+            draw_detail_background(context);
+            draw_detail_contents(context, &identity, panel, history, panel_x,
+                                 &seen_count, &seen_next,
+                                 &seen_decode_count, &seen_decode_next,
+                                 &seen_full_decode_sequence, false);
+            refresh_detail_panel(panel, history, panel_x);
+            last_background_refresh_ns = monotonic_time_ns();
             continue;
         }
 
@@ -1369,8 +1385,8 @@ static void show_details(struct ui_detail_context *context,
                 }
                 if (next != *context->selected) {
                     *context->selected = next;
-                    size_t visible_rows = LINES > (context->show_stats ? 14 : 5) ?
-                        (size_t)(LINES - (context->show_stats ? 14 : 5)) : 1U;
+                    size_t visible_rows = LINES > (*context->show_stats ? 14 : 5) ?
+                        (size_t)(LINES - (*context->show_stats ? 14 : 5)) : 1U;
                     *context->scroll_start = sn_ui_window_start(context->flow_count,
                                                                  next, visible_rows,
                                                                  *context->scroll_start);
@@ -1424,9 +1440,6 @@ int sn_ui_run(struct sn_monitor *monitor,
     bool show_stats = false;
     bool capture_polling = poll_capture != NULL;
     const char *capture_status = NULL;
-    struct sn_monitor_rate_sampler rate_sampler;
-    struct sn_monitor_rates rates = {0};
-    bool rates_ready = false;
     bool colors_enabled;
     int key;
 
@@ -1444,17 +1457,11 @@ int sn_ui_run(struct sn_monitor *monitor,
     wtimeout(stdscr, capture_polling ? 50 : -1);
     (void)curs_set(0);
     colors_enabled = initialize_ui_colors();
-    sn_monitor_rate_sampler_init(&rate_sampler);
-
     for (;;) {
         size_t flow_count = collect_flows(monitor, &filter, flows,
                           priority_ports, priority_count);
 
         if (capture_polling) {
-            if (sn_monitor_rate_sample(&rate_sampler, &monitor->stats,
-                                       monotonic_time_ns(), &rates)) {
-                rates_ready = true;
-            }
             if (poll_capture(poll_context, &capture_status) == SN_UI_POLL_STOPPED) {
                 capture_polling = false;
             }
@@ -1479,18 +1486,17 @@ int sn_ui_run(struct sn_monitor *monitor,
             .flow_count = flow_count,
             .selected = &selected,
             .scroll_start = &scroll_start,
-            .show_stats = show_stats,
+            .show_stats = &show_stats,
             .colors_enabled = colors_enabled,
             .recording_active = recording_active,
             .payload_inspection_active = payload_inspection_active,
             .capture_polling = &capture_polling,
-            .capture_status = &capture_status,
-            .rates = rates_ready ? &rates : (capture_polling ? &rates : NULL)
+            .capture_status = &capture_status
         };
         draw_screen(monitor, network_info, &filter, flows,
             priority_ports, priority_count, flow_count, selected, scroll_start,
                 show_stats, recording_active, payload_inspection_active,
-            capture_status, detail_context.rates, colors_enabled);
+                capture_status, colors_enabled, false);
         key = getch();
         if (key == 'q' || key == 'Q') {
             break;
@@ -1518,9 +1524,6 @@ int sn_ui_run(struct sn_monitor *monitor,
         case 'R':
             reset_monitor(monitor);
             filter = default_filter;
-            sn_monitor_rate_sampler_init(&rate_sampler);
-            rates = (struct sn_monitor_rates){0};
-            rates_ready = false;
             selected = 0U;
             scroll_start = 0U;
             break;

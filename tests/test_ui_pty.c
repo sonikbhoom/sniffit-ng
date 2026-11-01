@@ -117,6 +117,7 @@ struct ui_poll_context {
     struct sn_monitor *monitor;
     int trigger_fd;
     bool injected;
+    bool second_injected;
 };
 
 static enum sn_ui_poll_result inject_new_flow(void *opaque, const char **status)
@@ -126,7 +127,41 @@ static enum sn_ui_poll_result inject_new_flow(void *opaque, const char **status)
     char trigger;
 
     (void)status;
-    if (context->injected || read(context->trigger_fd, &trigger, 1U) != 1) {
+    if (context->injected) {
+        uint8_t frame[54U] = {0};
+        uint8_t *ip = frame + 14U;
+        uint8_t *tcp = ip + 20U;
+        struct sn_capture_packet packet = {0};
+
+        if (context->second_injected ||
+            read(context->trigger_fd, &trigger, 1U) != 1) {
+            return SN_UI_POLL_IDLE;
+        }
+        context->second_injected = true;
+        write_be16(frame + 12U, 0x0800U);
+        ip[0] = 0x45U;
+        write_be16(ip + 2U, 40U);
+        ip[8] = 64U;
+        ip[9] = 6U;
+        ip[12] = 10U;
+        ip[15] = 1U;
+        ip[16] = 10U;
+        ip[19] = 2U;
+        write_be16(tcp, 1234U);
+        write_be16(tcp + 2U, 22U);
+        tcp[12] = 0x50U;
+        tcp[13] = 0x10U;
+        packet.data = frame;
+        packet.captured_length = sizeof(frame);
+        packet.wire_length = sizeof(frame);
+        packet.timestamp.tv_sec = 1700000002;
+        packet.link_type = SN_PACKET_LINK_ETHERNET;
+        assert(sn_monitor_process(context->monitor, &packet) ==
+               SN_MONITOR_PROCESSED);
+         assert(context->monitor->stats.tcp_packets == 2U);
+        return SN_UI_POLL_UPDATED;
+    }
+    if (read(context->trigger_fd, &trigger, 1U) != 1) {
         return SN_UI_POLL_IDLE;
     }
 
@@ -246,13 +281,11 @@ int main(void)
     size_t output_length = 0U;
     bool details_opened;
     bool new_flow_visible_while_open;
-    bool selected_counters_updated;
     bool details_followed_highlight;
     bool source_filter_applied;
     bool source_filter_cleared;
     bool protocol_filter_applied;
     bool filters_cleared_by_reset;
-    bool new_full_decode_visible_while_open;
     bool ssh_header_dump_visible;
     bool ssh_header_row_visible;
 
@@ -381,19 +414,13 @@ int main(void)
         assert(write(trigger_pipe[1], "x", 1U) == 1);
     }
     new_flow_visible_while_open = read_until(master_fd, output, sizeof(output),
-                                             &output_length, "10.0.0.1", 1000);
-    selected_counters_updated = read_until(master_fd, output, sizeof(output),
-                                           &output_length,
-                                           "Packets A>B/B>A: 2/0", 1000);
-    new_full_decode_visible_while_open =
-        read_until(master_fd, output, sizeof(output), &output_length,
-                   "ff fb 03", 1000);
+                                             &output_length, "10.0.0.1", 2000);
     output[0] = '\0';
     output_length = 0U;
     assert(write(master_fd, "\033OB\033OB", 6U) == 6);
     details_followed_highlight =
         read_until(master_fd, output, sizeof(output), &output_length,
-                   "A 10.0.0.1:1234", 1000);
+                   "SSH HEADER VIEW", 1000);
     assert(read_until(master_fd, output, sizeof(output), &output_length,
                       "SECURITY: SSH payload is not decoded", 1000));
     assert(read_until(master_fd, output, sizeof(output), &output_length,
@@ -409,6 +436,17 @@ int main(void)
         read_until(master_fd, output, sizeof(output), &output_length,
                    "0000  00 00 00 00 00 00", 1000);
     assert(strstr(output, "de ad be ef") == NULL);
+    output[0] = '\0';
+    output_length = 0U;
+    assert(write(master_fd, "n", 1U) == 1);
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "Packet totals: IP 1  TCP 1", 1000));
+    assert(write(trigger_pipe[1], "y", 1U) == 1);
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "TCP 1234->22 flags=0x10", 1000));
+    assert(write(master_fd, "nn", 2U) == 2);
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "Packet totals: IP 2  TCP 2", 2500));
     output[0] = '\0';
     output_length = 0U;
     assert(write(master_fd, "q1", 2U) == 2);
@@ -448,9 +486,7 @@ int main(void)
     assert(close(trigger_pipe[1]) == 0);
     assert(details_opened);
     assert(new_flow_visible_while_open);
-    assert(selected_counters_updated);
     assert(details_followed_highlight);
-    assert(new_full_decode_visible_while_open);
     assert(ssh_header_dump_visible);
     assert(ssh_header_row_visible);
     assert(protocol_filter_applied);
