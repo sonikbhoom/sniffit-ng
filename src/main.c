@@ -508,7 +508,7 @@ int main(int argc, char **argv)
             return 0;
         }
         if (strcmp(argv[index], "--version") == 0 && argc == 2) {
-            puts("Sniffit NG 0.1.0");
+            puts("Sniffit NG " SNIFFIT_NG_VERSION);
             return 0;
         }
         if (strcmp(argv[index], "--read-pcap") == 0 && index + 1 < argc && pcap_path == NULL) {

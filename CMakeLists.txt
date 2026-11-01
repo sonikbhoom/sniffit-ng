@@ -145,6 +145,7 @@ target_sources(sniffit_ui PRIVATE src/ui_window.c src/icmp_payload_view.c)
 target_link_libraries(sniffit_ui PUBLIC sniffit_monitor sniffit_config PkgConfig::NCURSESW)
 
 add_executable(sniffit-ng src/main.c)
+target_compile_definitions(sniffit-ng PRIVATE SNIFFIT_NG_VERSION="${PROJECT_VERSION}")
 target_link_libraries(sniffit-ng PRIVATE
     sniffit_ui sniffit_payload_log sniffit_priority_log sniffit_pcap_writer sniffit_privilege
     sniffit_network_info sniffit_config sniffit_inspect
