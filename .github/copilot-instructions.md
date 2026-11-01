@@ -58,4 +58,4 @@ There is no separate lint target or lint workflow. GCC and Clang builds enable `
 
 ## Priority-port log
 
-`src/priority_log.c` writes JSONL for inbound packets to `ui_priority` ports when `priority_log` (absolute path, off by default) is set; `main.c` wires it into `poll_live_capture` and `replay_pcap`. The file is opened 0600 with `O_NOFOLLOW` and a write failure stops capture. `scripts/sniffit-ng-scanmap.py` is the offline analyzer; its tests (`tests/scanmap`, ctest `scanmap_tool`) must never touch the network.
+`src/priority_log.c` writes JSONL for inbound packets to `ui_priority` ports when `priority_log` (absolute path, off by default) is set; `main.c` wires it into `poll_live_capture` and `replay_pcap`. The file is opened 0600 with `O_NOFOLLOW` and a write failure stops capture. It rotates by size (`priority_log_max_mb`) or UTC-day change, keeping `priority_log_keep` files. `scripts/sniffit-ng-scanmap.py` is the offline analyzer; its tests (`tests/scanmap`, ctest `scanmap_tool`) must never touch the network.

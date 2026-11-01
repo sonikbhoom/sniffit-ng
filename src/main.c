@@ -215,6 +215,7 @@ static int replay_pcap(const char *path,
                        const uint8_t *hidden_protocols,
                        size_t hidden_count,
                        const char *priority_log_path,
+                       const struct sn_priority_log_limits *priority_log_limits,
                        const char *payload_log_path,
                        const char *pcap_output_path)
 {
@@ -263,7 +264,7 @@ static int replay_pcap(const char *path,
         priority_count > 0U) {
         priority_log = sn_priority_log_open(priority_log_path, priority_ports,
                                             priority_count, NULL,
-                                            error, sizeof(error));
+                                            priority_log_limits, error, sizeof(error));
         if (priority_log == NULL) {
             fprintf(stderr, "sniffit-ng: cannot open priority log: %s\n", error);
             (void)sn_payload_log_close(payload_log);
@@ -355,6 +356,7 @@ static int run_live_capture(const char *device,
                             const uint8_t *hidden_protocols,
                             size_t hidden_count,
                             const char *priority_log_path,
+                       const struct sn_priority_log_limits *priority_log_limits,
                             bool resolve_external_addr,
                             const char *payload_log_path,
                             const char *pcap_output_path)
@@ -419,7 +421,7 @@ static int run_live_capture(const char *device,
         priority_count > 0U) {
         priority_log = sn_priority_log_open(priority_log_path, priority_ports,
                                             priority_count, network_info.local_ipv4,
-                                            error, sizeof(error));
+                                            priority_log_limits, error, sizeof(error));
         if (priority_log == NULL) {
             fprintf(stderr, "sniffit-ng: cannot open priority log after privilege drop: %s\n",
                     error);
@@ -590,6 +592,11 @@ int main(int argc, char **argv)
         payload_log_path = "sniffit-ng-payload.log";
     }
 
+    const struct sn_priority_log_limits limits = {
+        .max_bytes = config.priority_log_max_bytes,
+        .keep = config.priority_log_keep,
+    };
+
     if (pcap_path != NULL) {
         return replay_pcap(pcap_path, payload_logging_enabled,
                            pcap_output_path != NULL,
@@ -599,6 +606,7 @@ int main(int argc, char **argv)
                            config.ui_priority_ports, config.ui_priority_count,
                            config.hide_protocols, config.hide_protocol_count,
                            config.priority_log_path,
+                           &limits,
                            payload_log_path,
                            pcap_output_path);
     }
@@ -610,6 +618,7 @@ int main(int argc, char **argv)
                             config.ui_priority_ports, config.ui_priority_count,
                             config.hide_protocols, config.hide_protocol_count,
                             config.priority_log_path,
+                           &limits,
                             config.resolve_external_addr,
                             payload_log_path, pcap_output_path);
 }

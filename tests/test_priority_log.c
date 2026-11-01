@@ -7,6 +7,7 @@
 #endif
 #include <assert.h>
 #include <fcntl.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -74,6 +75,70 @@ static char *read_file(const char *path)
     return buffer;
 }
 
+static bool exists(const char *path)
+{
+    struct stat info;
+
+    return stat(path, &info) == 0;
+}
+
+static void test_rotation(const char *directory,
+                          const struct sn_ui_priority_port *ports,
+                          const uint8_t remote[4],
+                          const uint8_t other[4],
+                          uint8_t *frame,
+                          size_t frame_size)
+{
+    const struct sn_priority_log_limits limits = {.max_bytes = 300UL, .keep = 2U};
+    char path[128];
+    char name[160];
+    char error[256];
+    struct sn_priority_log *log;
+    struct sn_capture_packet packet;
+    struct stat info;
+
+    (void)snprintf(path, sizeof(path), "%s/rot.jsonl", directory);
+    log = sn_priority_log_open(path, ports, 2U, NULL, &limits, error, sizeof(error));
+    assert(log != NULL);
+
+    /* Size: each record is ~120 bytes, so the fourth write rotates; keep=2 bounds files. */
+    for (unsigned int index = 0U; index < 12U; ++index) {
+        packet = make_packet(frame, frame_size, 6U, remote, other, 41000U, 22U,
+                             0x02U, 1793567600L + (long)index, 0L);
+        assert(sn_priority_log_observe(log, &packet));
+    }
+    assert(exists(path));
+    (void)snprintf(name, sizeof(name), "%s.1", path);
+    assert(exists(name));
+    (void)snprintf(name, sizeof(name), "%s.2", path);
+    assert(exists(name));
+    (void)snprintf(name, sizeof(name), "%s.3", path);
+    assert(!exists(name));
+    assert(stat(path, &info) == 0 && (info.st_mode & 0777U) == 0600U);
+    assert(info.st_size > 0 && (unsigned long)info.st_size < 300UL + 200UL);
+
+    /* A new UTC day rotates even when the file is small. */
+    assert(sn_priority_log_close(log));
+    assert(unlink(path) == 0);
+    (void)snprintf(name, sizeof(name), "%s.1", path);
+    assert(unlink(name) == 0);
+    (void)snprintf(name, sizeof(name), "%s.2", path);
+    assert(unlink(name) == 0);
+    log = sn_priority_log_open(path, ports, 2U, NULL, NULL, error, sizeof(error));
+    assert(log != NULL);
+    packet = make_packet(frame, frame_size, 6U, remote, other, 41000U, 22U,
+                         0x02U, 1793567600L, 0L);
+    assert(sn_priority_log_observe(log, &packet));
+    packet = make_packet(frame, frame_size, 6U, remote, other, 41000U, 22U,
+                         0x02U, 1793567600L + 86400L, 0L);
+    assert(sn_priority_log_observe(log, &packet));
+    assert(sn_priority_log_close(log));
+    (void)snprintf(name, sizeof(name), "%s.1", path);
+    assert(exists(name));
+    assert(unlink(name) == 0);
+    assert(unlink(path) == 0);
+}
+
 int main(void)
 {
     static const uint8_t local[4] = {192U, 0U, 2U, 10U};
@@ -97,11 +162,11 @@ int main(void)
     (void)snprintf(path, sizeof(path), "%s/priority.jsonl", directory);
     (void)snprintf(link, sizeof(link), "%s/link.jsonl", directory);
 
-    assert(sn_priority_log_open("relative.jsonl", ports, 2U, NULL,
+    assert(sn_priority_log_open("relative.jsonl", ports, 2U, NULL, NULL,
                                 error, sizeof(error)) == NULL);
-    assert(sn_priority_log_open(path, ports, 0U, NULL, error, sizeof(error)) == NULL);
+    assert(sn_priority_log_open(path, ports, 0U, NULL, NULL, error, sizeof(error)) == NULL);
 
-    log = sn_priority_log_open(path, ports, 2U, "192.0.2.10", error, sizeof(error));
+    log = sn_priority_log_open(path, ports, 2U, "192.0.2.10", NULL, error, sizeof(error));
     assert(log != NULL);
     assert(stat(path, &info) == 0 && (info.st_mode & 0777U) == 0600U);
 
@@ -146,7 +211,7 @@ int main(void)
     }
 
     /* Reopening appends; without a known local address every destination matches. */
-    log = sn_priority_log_open(path, ports, 2U, NULL, error, sizeof(error));
+    log = sn_priority_log_open(path, ports, 2U, NULL, NULL, error, sizeof(error));
     assert(log != NULL);
     packet = make_packet(frame, sizeof(frame), 6U, remote, other, 40002U, 22U,
                          0x12U, 1793567528L, 1000L);
@@ -156,12 +221,14 @@ int main(void)
     assert(strstr(contents, "\"dst\":\"192.0.2.99\",\"dport\":22,\"flags\":\"AS\"") != NULL);
 
     assert(symlink(path, link) == 0);
-    assert(sn_priority_log_open(link, ports, 2U, NULL, error, sizeof(error)) == NULL);
+    assert(sn_priority_log_open(link, ports, 2U, NULL, NULL, error, sizeof(error)) == NULL);
     assert(chmod(path, 0644) == 0);
-    assert(sn_priority_log_open(path, ports, 2U, NULL, error, sizeof(error)) == NULL);
+    assert(sn_priority_log_open(path, ports, 2U, NULL, NULL, error, sizeof(error)) == NULL);
 
     assert(unlink(link) == 0);
     assert(unlink(path) == 0);
+
+    test_rotation(directory, ports, remote, other, frame, sizeof(frame));
     assert(rmdir(directory) == 0);
     puts("priority log tests passed");
     return 0;

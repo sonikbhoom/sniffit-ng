@@ -145,7 +145,7 @@ Set `hide_protocol` to a comma-separated list of `tcp`, `udp`, `icmp`, `igmp` an
 
 ### Priority-port log and scan map
 
-Set `priority_log = /absolute/path.jsonl` to append one JSON line for every TCP/UDP packet (first fragment, IPv4) sent by a remote host to a local `ui_priority` port. It is off by default, and is also written in replay mode (without address filtering). The file is created owner-only (0600), symlinks and files with group/other access are rejected, and a write failure stops capture. Each packet is logged, so busy sessions produce large files. Example line:
+Set `priority_log = /absolute/path.jsonl` to append one JSON line for every TCP/UDP packet (first fragment, IPv4) sent by a remote host to a local `ui_priority` port. It is off by default, and is also written in replay mode (without address filtering). The file is created owner-only (0600), symlinks and files with group/other access are rejected, and a write failure stops capture. Each packet is logged, so busy sessions produce large files; the log is therefore rotated automatically when it reaches `priority_log_max_mb` (default 10) or when the UTC day changes, keeping `priority_log_keep` (default 7) rotated files named `PATH.1` (newest) to `PATH.N`. Rotated files stay owner-only, and pass them all to the analyzer. Example line:
 
 ```
 {"ts":"2026-11-01T21:12:05.959Z","proto":"tcp","src":"203.0.113.9","sport":40000,"dst":"192.0.2.10","dport":22,"flags":"S","len":40}

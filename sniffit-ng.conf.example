@@ -28,6 +28,10 @@ hide_protocol = icmp
 # Opt-in: append one JSON line per inbound packet to a ui_priority port to this
 # absolute path (owner-only 0600 file). Off by default. Can grow quickly.
 # priority_log = /var/log/sniffit-ng/priority.jsonl
+# Rotation: the log rolls to PATH.1 .. PATH.N when it reaches priority_log_max_mb
+# (1-1024, default 10) or when the UTC day changes; N is priority_log_keep (1-100, default 7).
+# priority_log_max_mb = 10
+# priority_log_keep = 7
 
 # Enable statically linked researcher-supplied protocol extensions.
 # Compiled extension code is trusted executable code and is not sandboxed.

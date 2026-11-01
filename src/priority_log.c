@@ -13,11 +13,20 @@
 
 struct sn_priority_log {
     FILE *stream;
+    char path[SN_PRIORITY_LOG_PATH_CAPACITY];
+    struct sn_priority_log_limits limits;
+    unsigned long size;
+    long day;
     struct sn_ui_priority_port ports[SN_CONFIG_UI_PRIORITY_CAPACITY];
     size_t port_count;
     bool local_known;
     uint8_t local_ipv4[4];
 };
+
+static long utc_day(time_t seconds)
+{
+    return (long)(seconds / 86400);
+}
 
 static void copy_error(char *destination, size_t capacity, const char *message)
 {
@@ -31,6 +40,7 @@ struct sn_priority_log *sn_priority_log_open(
     const struct sn_ui_priority_port *ports,
     size_t port_count,
     const char *local_ipv4,
+    const struct sn_priority_log_limits *limits,
     char *error_buffer,
     size_t error_buffer_size)
 {
@@ -41,6 +51,10 @@ struct sn_priority_log *sn_priority_log_open(
     if (path == NULL || path[0] != '/') {
         copy_error(error_buffer, error_buffer_size,
                    "priority log path must be absolute");
+        return NULL;
+    }
+    if (strlen(path) >= sizeof(log->path) - 16U) {
+        copy_error(error_buffer, error_buffer_size, "priority log path is too long");
         return NULL;
     }
     if (ports == NULL || port_count == 0U ||
@@ -75,6 +89,13 @@ struct sn_priority_log *sn_priority_log_open(
         copy_error(error_buffer, error_buffer_size, strerror(saved_errno));
         return NULL;
     }
+    snprintf(log->path, sizeof(log->path), "%s", path);
+    log->limits.max_bytes = limits != NULL && limits->max_bytes > 0UL ?
+        limits->max_bytes : SN_PRIORITY_LOG_DEFAULT_MAX_BYTES;
+    log->limits.keep = limits != NULL && limits->keep > 0U ?
+        limits->keep : SN_PRIORITY_LOG_DEFAULT_KEEP;
+    log->size = (unsigned long)info.st_size;
+    log->day = info.st_size > 0 ? utc_day(info.st_mtime) : -1;
     memcpy(log->ports, ports, port_count * sizeof(log->ports[0]));
     log->port_count = port_count;
     if (local_ipv4 != NULL && local_ipv4[0] != '\0') {
@@ -82,6 +103,47 @@ struct sn_priority_log *sn_priority_log_open(
     }
     copy_error(error_buffer, error_buffer_size, "");
     return log;
+}
+
+static bool rotate(struct sn_priority_log *log)
+{
+    char from[SN_PRIORITY_LOG_PATH_CAPACITY + 16U];
+    char to[SN_PRIORITY_LOG_PATH_CAPACITY + 16U];
+    int descriptor;
+
+    if (fclose(log->stream) != 0) {
+        log->stream = NULL;
+        return false;
+    }
+    log->stream = NULL;
+    snprintf(to, sizeof(to), "%s.%u", log->path, log->limits.keep);
+    if (unlink(to) != 0 && errno != ENOENT) {
+        return false;
+    }
+    for (unsigned int index = log->limits.keep; index > 1U; --index) {
+        snprintf(from, sizeof(from), "%s.%u", log->path, index - 1U);
+        snprintf(to, sizeof(to), "%s.%u", log->path, index);
+        if (rename(from, to) != 0 && errno != ENOENT) {
+            return false;
+        }
+    }
+    snprintf(to, sizeof(to), "%s.1", log->path);
+    if (rename(log->path, to) != 0) {
+        return false;
+    }
+    descriptor = open(log->path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+                      S_IRUSR | S_IWUSR);
+    if (descriptor < 0) {
+        return false;
+    }
+    log->stream = fdopen(descriptor, "a");
+    if (log->stream == NULL) {
+        close(descriptor);
+        return false;
+    }
+    log->size = 0UL;
+    log->day = -1;
+    return true;
 }
 
 static bool port_is_priority(const struct sn_priority_log *log,
@@ -162,15 +224,27 @@ bool sn_priority_log_observe(struct sn_priority_log *log,
         }
         flags[used] = '\0';
     }
-    if (fprintf(log->stream,
+    if (log->stream == NULL) {
+        return false;
+    }
+    if (log->size > 0UL &&
+        (log->size >= log->limits.max_bytes ||
+         (log->day >= 0 && log->day != utc_day(seconds))) &&
+        !rotate(log)) {
+        return false;
+    }
+    written = fprintf(log->stream,
                 "{\"ts\":\"%s\",\"proto\":\"%s\",\"src\":\"%s\",\"sport\":%u,"
                 "\"dst\":\"%s\",\"dport\":%u,\"flags\":\"%s\",\"len\":%zu}\n",
                 stamp, view.protocol == 6U ? "tcp" : "udp", source,
                 (unsigned int)source_port, destination,
                 (unsigned int)destination_port, flags,
-                view.ipv4_total_length) < 0) {
+                view.ipv4_total_length);
+    if (written < 0) {
         return false;
     }
+    log->size += (unsigned long)written;
+    log->day = utc_day(seconds);
     return fflush(log->stream) == 0;
 }
 
@@ -179,7 +253,7 @@ bool sn_priority_log_close(struct sn_priority_log *log)
     bool ok = true;
 
     if (log != NULL) {
-        ok = fclose(log->stream) == 0;
+        ok = log->stream == NULL || fclose(log->stream) == 0;
         free(log);
     }
     return ok;

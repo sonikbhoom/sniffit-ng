@@ -2,6 +2,7 @@
 
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
@@ -173,6 +174,8 @@ void sn_config_init(struct sn_app_config *config)
         config->ui_priority_count = 2U;
         config->hide_protocols[0] = 1U;
         config->hide_protocol_count = 1U;
+        config->priority_log_max_bytes = SN_PRIORITY_LOG_DEFAULT_MAX_BYTES;
+        config->priority_log_keep = SN_PRIORITY_LOG_DEFAULT_KEEP;
     }
 }
 
@@ -218,6 +221,8 @@ bool sn_config_load_file(const char *path,
     bool ui_priority_setting_seen = false;
     bool hide_protocol_setting_seen = false;
     bool priority_log_setting_seen = false;
+    bool priority_log_max_mb_seen = false;
+    bool priority_log_keep_seen = false;
     bool decoder_setting_seen[SN_DECODER_MODULE_COUNT] = {false};
 
     if (path == NULL || path[0] == '\0' || config == NULL) {
@@ -354,6 +359,34 @@ bool sn_config_load_file(const char *path,
                 }
                 (void)snprintf(config->priority_log_path,
                                sizeof(config->priority_log_path), "%s", value);
+            } else if (strcmp(key, "priority_log_max_mb") == 0 &&
+                       !priority_log_max_mb_seen) {
+                char *end = NULL;
+                unsigned long megabytes = strtoul(value, &end, 10);
+
+                priority_log_max_mb_seen = true;
+                if (value[0] < '0' || value[0] > '9' || *end != '\0' ||
+                    megabytes < 1UL || megabytes > 1024UL) {
+                    fclose(stream);
+                    set_error(error_buffer, error_buffer_size,
+                              "priority_log_max_mb must be 1-1024", line_number);
+                    return false;
+                }
+                config->priority_log_max_bytes = megabytes * 1024UL * 1024UL;
+            } else if (strcmp(key, "priority_log_keep") == 0 &&
+                       !priority_log_keep_seen) {
+                char *end = NULL;
+                unsigned long keep = strtoul(value, &end, 10);
+
+                priority_log_keep_seen = true;
+                if (value[0] < '0' || value[0] > '9' || *end != '\0' ||
+                    keep < 1UL || keep > 100UL) {
+                    fclose(stream);
+                    set_error(error_buffer, error_buffer_size,
+                              "priority_log_keep must be 1-100", line_number);
+                    return false;
+                }
+                config->priority_log_keep = (unsigned int)keep;
             } else if (strcmp(key, "hide_protocol") == 0 &&
                        !hide_protocol_setting_seen) {
                 hide_protocol_setting_seen = true;

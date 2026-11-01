@@ -282,6 +282,29 @@ static void test_hide_protocol_defaults_and_parsing(void)
     }
 }
 
+static void test_priority_log_rotation_keys(void)
+{
+    struct sn_app_config config;
+    char error[128];
+    char path[] = "/tmp/sniffit-rotation-XXXXXX";
+
+    assert(mkstemp(path) >= 0);
+    sn_config_init(&config);
+    assert(config.priority_log_max_bytes == 10UL * 1024UL * 1024UL);
+    assert(config.priority_log_keep == 7U);
+    write_config_file(path, "priority_log_max_mb = 2\npriority_log_keep = 3\n");
+    assert(sn_config_load_file(path, &config, error, sizeof(error)));
+    assert(config.priority_log_max_bytes == 2UL * 1024UL * 1024UL);
+    assert(config.priority_log_keep == 3U);
+    write_config_file(path, "priority_log_max_mb = 0\n");
+    assert(!sn_config_load_file(path, &config, error, sizeof(error)));
+    write_config_file(path, "priority_log_keep = 101\n");
+    assert(!sn_config_load_file(path, &config, error, sizeof(error)));
+    write_config_file(path, "priority_log_keep = abc\n");
+    assert(!sn_config_load_file(path, &config, error, sizeof(error)));
+    unlink(path);
+}
+
 static void test_priority_log_path(void)
 {
     char path[80];
@@ -313,6 +336,7 @@ static void test_priority_log_path(void)
 int main(void)
 {
     test_priority_log_path();
+    test_priority_log_rotation_keys();
     test_hide_protocol_defaults_and_parsing();
     test_payload_inspection_requires_recorded_ack();
     test_payload_inspection_defaults_off();
