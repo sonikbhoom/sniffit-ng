@@ -72,6 +72,27 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(scanmap.classify({"packets": 3}, 20), "probe")
 
 
+class RotationTests(unittest.TestCase):
+    def test_rotated_siblings_are_included_oldest_first_without_duplicates(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = os.path.join(directory, "p.jsonl")
+            for suffix in ("", ".1", ".2"):
+                with open(base + suffix, "w", encoding="utf-8") as stream:
+                    stream.write(LOG_LINES[0] + "\n")
+            expected = [base + ".2", base + ".1", base]
+            self.assertEqual(scanmap.expand_logs([base]), expected)
+            self.assertEqual(scanmap.expand_logs([base, base + ".1"]), expected)
+            self.assertEqual(scanmap.expand_logs([base], False), [base])
+            sources, stats = scanmap.parse_log(scanmap.expand_logs([base]))
+            self.assertEqual(sources[GLOBAL]["packets"], 3)
+
+    def test_missing_log_is_an_error(self):
+        stderr = io.StringIO()
+        code = scanmap.main(["/nonexistent/priority.jsonl", "-o", "-"], stderr=stderr)
+        self.assertEqual(code, 1)
+        self.assertIn("error", stderr.getvalue())
+
+
 class SummaryTests(unittest.TestCase):
     def test_rdap_summary(self):
         summary = scanmap.summarize_rdap(RDAP)

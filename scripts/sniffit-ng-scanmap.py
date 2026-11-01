@@ -31,6 +31,33 @@ NOTICE = ("Source addresses are unauthenticated claims; SYN-only traffic can "
           "be spoofed. Geolocation is approximate.")
 
 
+def expand_logs(paths, include_rotated=True):
+    """Return the given logs plus rotated siblings (PATH.1, PATH.2, ...), oldest first.
+
+    Duplicates are dropped, so passing both PATH and PATH.1 never double counts.
+    """
+    ordered = []
+    seen = set()
+
+    def add(path):
+        real = os.path.realpath(path)
+        if real not in seen:
+            seen.add(real)
+            ordered.append(path)
+
+    for path in paths:
+        if include_rotated:
+            rotated = []
+            index = 1
+            while os.path.isfile("%s.%d" % (path, index)):
+                rotated.append("%s.%d" % (path, index))
+                index += 1
+            for name in reversed(rotated):
+                add(name)
+        add(path)
+    return ordered
+
+
 def parse_log(paths):
     """Aggregate log lines per source address. Returns (sources, stats)."""
     sources = {}
@@ -360,7 +387,11 @@ def default_cache_path():
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("logs", nargs="+", metavar="LOG", help="priority log file(s)")
+    parser.add_argument("logs", nargs="+", metavar="LOG",
+                        help="priority log file(s); rotated PATH.1, PATH.2, ... are "
+                             "included automatically")
+    parser.add_argument("--no-rotated", action="store_true",
+                        help="read only the files named, not their rotated siblings")
     parser.add_argument("-o", "--output", default="scanmap.geojson",
                         help="GeoJSON output path, or - for stdout (default: %(default)s)")
     parser.add_argument("--lookup", choices=("none", "rdap", "ipwhois", "all"),
@@ -387,7 +418,7 @@ def main(argv=None, fetch=http_get_json, stdin=None, stderr=None,
     stdin = stdin or sys.stdin
     stderr = stderr or sys.stderr
     try:
-        sources, stats = parse_log(args.logs)
+        sources, stats = parse_log(expand_logs(args.logs, not args.no_rotated))
     except OSError as error:
         print("error: %s" % error, file=stderr)
         return 1
