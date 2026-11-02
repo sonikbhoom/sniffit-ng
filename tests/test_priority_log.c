@@ -210,7 +210,17 @@ int main(void)
         assert(lines == 2U);
     }
 
-    /* Reopening appends; without a known local address every destination matches. */
+    /* Reopening appends; without a known local address every destination matches.
+     * The log seeds its current day from the file mtime, so pin it to the fixture
+     * day to keep this step independent of the wall clock. */
+    {
+        const struct timespec times[2] = {
+            {.tv_sec = 1793567530L, .tv_nsec = 0L},
+            {.tv_sec = 1793567530L, .tv_nsec = 0L}
+        };
+
+        assert(utimensat(AT_FDCWD, path, times, 0) == 0);
+    }
     log = sn_priority_log_open(path, ports, 2U, NULL, NULL, error, sizeof(error));
     assert(log != NULL);
     packet = make_packet(frame, sizeof(frame), 6U, remote, other, 40002U, 22U,

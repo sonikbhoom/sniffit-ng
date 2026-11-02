@@ -286,9 +286,8 @@ static void test_priority_log_rotation_keys(void)
 {
     struct sn_app_config config;
     char error[128];
-    char path[] = "/tmp/sniffit-rotation-XXXXXX";
+    char path[80];
 
-    assert(mkstemp(path) >= 0);
     sn_config_init(&config);
     assert(config.priority_log_max_bytes == 10UL * 1024UL * 1024UL);
     assert(config.priority_log_keep == 7U);
@@ -296,13 +295,16 @@ static void test_priority_log_rotation_keys(void)
     assert(sn_config_load_file(path, &config, error, sizeof(error)));
     assert(config.priority_log_max_bytes == 2UL * 1024UL * 1024UL);
     assert(config.priority_log_keep == 3U);
+    assert(unlink(path) == 0);
     write_config_file(path, "priority_log_max_mb = 0\n");
     assert(!sn_config_load_file(path, &config, error, sizeof(error)));
+    assert(unlink(path) == 0);
     write_config_file(path, "priority_log_keep = 101\n");
     assert(!sn_config_load_file(path, &config, error, sizeof(error)));
+    assert(unlink(path) == 0);
     write_config_file(path, "priority_log_keep = abc\n");
     assert(!sn_config_load_file(path, &config, error, sizeof(error)));
-    unlink(path);
+    assert(unlink(path) == 0);
 }
 
 static void test_priority_log_path(void)
