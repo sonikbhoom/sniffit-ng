@@ -1,0 +1,11 @@
+# Use an existing owner-only directory; do not share it with other applications.
+log_directory = /absolute/path/to/private-arpwatch-logs
+packet_logging = true
+address_logging = true
+packet_segment_bytes = 67108864
+address_segment_bytes = 16777216
+rotate_daily = true
+idle_seconds = 0
+maximum_age_seconds = 2592000
+maximum_total_bytes = 1073741824
+delete_old_segments = true

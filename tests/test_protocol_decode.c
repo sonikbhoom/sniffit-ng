@@ -1,4 +1,5 @@
 #include "sniffit_ng/protocol_decode.h"
+#include "sniffit_ng/arp.h"
 #include "sniffit_ng/http_decode_extension.h"
 #include "sniffit_ng/protocol_decode_extension.h"
 #include "decode_placeholder_internal.h"
@@ -1154,12 +1155,109 @@ static void test_invalid_decoder_arguments(void)
     assert(tiny_output[0] == '\0');
 }
 
+static void test_arp_decoder(void)
+{
+    uint8_t arp[28] = {
+        0U, 1U, 8U, 0U, 6U, 4U, 0U, 1U,
+        0x02U, 0U, 0U, 0U, 0U, 1U, 192U, 0U, 2U, 1U,
+        0U, 0U, 0U, 0U, 0U, 0U, 192U, 0U, 2U, 2U
+    };
+    uint8_t frame[64] = {0};
+    struct sn_arp_packet packet;
+    size_t payload_offset;
+    char output[160];
+    char tiny[1] = {'x'};
+
+    assert(sn_arp_parse(arp, sizeof(arp), &packet) == SN_PACKET_OK);
+    assert(packet.operation == 1U && packet.sender_mac[0] == 2U);
+    assert(packet.sender_ipv4[3] == 1U && packet.target_ipv4[3] == 2U);
+    assert(sn_decode_arp(arp, sizeof(arp), output, sizeof(output)));
+    assert(strstr(output, "ARP request 192.0.2.1") != NULL);
+    assert(!sn_decode_arp(arp, sizeof(arp), tiny, sizeof(tiny)) && tiny[0] == '\0');
+    assert(!sn_decode_arp(arp, sizeof(arp), NULL, 0U));
+    assert(!sn_decode_arp(NULL, sizeof(arp), output, sizeof(output)) && output[0] == '\0');
+    for (size_t length = 0U; length < sizeof(arp); ++length) {
+        assert(sn_arp_parse(arp, length, &packet) == SN_PACKET_TRUNCATED);
+    }
+    assert(sn_arp_parse(NULL, sizeof(arp), &packet) == SN_PACKET_MALFORMED);
+    assert(sn_arp_parse(arp, sizeof(arp), NULL) == SN_PACKET_MALFORMED);
+    arp[7] = 2U;
+    assert(sn_arp_parse(arp, sizeof(arp), &packet) == SN_PACKET_OK && packet.operation == 2U);
+    assert(sn_decode_arp(arp, sizeof(arp), output, sizeof(output)));
+    assert(strstr(output, "ARP reply") != NULL);
+    arp[7] = 1U;
+    memset(arp + 14U, 0, 4U);
+    assert(sn_arp_parse(arp, sizeof(arp), &packet) == SN_PACKET_OK && packet.sender_ipv4[0] == 0U);
+    memcpy(arp + 14U, arp + 24U, 4U);
+    assert(sn_arp_parse(arp, sizeof(arp), &packet) == SN_PACKET_OK);
+    assert(memcmp(packet.sender_ipv4, packet.target_ipv4, 4U) == 0);
+    arp[4] = 0U;
+    assert(sn_arp_parse(arp, sizeof(arp), &packet) == SN_PACKET_MALFORMED);
+    arp[4] = 6U;
+    arp[1] = 2U;
+    assert(sn_arp_parse(arp, sizeof(arp), &packet) == SN_PACKET_UNSUPPORTED);
+    arp[1] = 1U;
+    arp[3] = 1U;
+    assert(sn_arp_parse(arp, sizeof(arp), &packet) == SN_PACKET_UNSUPPORTED);
+    arp[3] = 0U;
+    arp[4] = 5U;
+    assert(sn_arp_parse(arp, sizeof(arp), &packet) == SN_PACKET_UNSUPPORTED);
+    arp[4] = 7U;
+    assert(sn_arp_parse(arp, sizeof(arp), &packet) == SN_PACKET_TRUNCATED);
+    arp[4] = 6U;
+    arp[7] = 3U;
+    assert(sn_arp_parse(arp, sizeof(arp), &packet) == SN_PACKET_UNSUPPORTED);
+    arp[7] = 1U;
+
+    frame[12] = 0x08U;
+    frame[13] = 0x06U;
+    memcpy(frame + 14U, arp, sizeof(arp));
+    assert(sn_arp_parse_link(frame, 42U, SN_PACKET_LINK_ETHERNET, &packet) == SN_PACKET_OK);
+    assert(sn_arp_locate_link(frame, 14U, SN_PACKET_LINK_ETHERNET, &payload_offset) == SN_PACKET_OK);
+    assert(payload_offset == 14U);
+    assert(sn_arp_parse_link(frame, 14U, SN_PACKET_LINK_ETHERNET, &packet) == SN_PACKET_TRUNCATED);
+    assert(sn_arp_locate_link(frame, 42U, SN_PACKET_LINK_ETHERNET, NULL) == SN_PACKET_MALFORMED);
+    assert(sn_arp_parse_link(frame, 13U, SN_PACKET_LINK_ETHERNET, &packet) == SN_PACKET_TRUNCATED);
+    frame[13] = 0x00U;
+    assert(sn_arp_parse_link(frame, 42U, SN_PACKET_LINK_ETHERNET, &packet) == SN_PACKET_UNSUPPORTED);
+    assert(sn_arp_parse_link(NULL, 42U, SN_PACKET_LINK_ETHERNET, &packet) == SN_PACKET_MALFORMED);
+    assert(sn_arp_parse_link(frame, 42U, SN_PACKET_LINK_ETHERNET, NULL) == SN_PACKET_MALFORMED);
+    assert(sn_arp_parse_link(frame, 42U, (enum sn_packet_link_type)99, &packet) == SN_PACKET_UNSUPPORTED);
+    memset(frame, 0, sizeof(frame));
+    frame[14] = 0x08U;
+    frame[15] = 0x06U;
+    memcpy(frame + 16U, arp, sizeof(arp));
+    assert(sn_arp_parse_link(frame, 44U, SN_PACKET_LINK_LINUX_SLL, &packet) == SN_PACKET_OK);
+    assert(sn_arp_parse_link(frame, 15U, SN_PACKET_LINK_LINUX_SLL, &packet) == SN_PACKET_TRUNCATED);
+    memset(frame, 0, sizeof(frame));
+    frame[14] = 0x81U;
+    frame[15] = 0x00U;
+    frame[18] = 0x08U;
+    frame[19] = 0x06U;
+    memcpy(frame + 20U, arp, sizeof(arp));
+    assert(sn_arp_parse_link(frame, 48U, SN_PACKET_LINK_LINUX_SLL, &packet) == SN_PACKET_OK);
+    assert(sn_arp_parse_link(frame, 19U, SN_PACKET_LINK_LINUX_SLL, &packet) == SN_PACKET_TRUNCATED);
+    memset(frame, 0, sizeof(frame));
+    frame[12] = 0x88U;
+    frame[13] = 0xa8U;
+    frame[16] = 0x81U;
+    frame[17] = 0x00U;
+    frame[20] = 0x08U;
+    frame[21] = 0x06U;
+    memcpy(frame + 22U, arp, sizeof(arp));
+    assert(sn_arp_parse_link(frame, 50U, SN_PACKET_LINK_ETHERNET, &packet) == SN_PACKET_OK);
+    assert(sn_arp_parse_link(frame, 17U, SN_PACKET_LINK_ETHERNET, &packet) == SN_PACKET_TRUNCATED);
+    frame[20] = 0x81U;
+    frame[21] = 0x00U;
+    assert(sn_arp_parse_link(frame, 50U, SN_PACKET_LINK_ETHERNET, &packet) == SN_PACKET_MALFORMED);
+}
+
 static void test_protocol_placeholders_are_inert(void)
 {
     typedef bool (*placeholder_decoder)(const uint8_t *, size_t, char *, size_t);
     static const placeholder_decoder decoders[] = {
         sn_decode_icmpv6, sn_decode_ndp,
-        sn_decode_dhcp6, sn_decode_ospf3, sn_decode_ripng, sn_decode_arp,
+        sn_decode_dhcp6, sn_decode_ospf3, sn_decode_ripng,
         sn_decode_lldp, sn_decode_cdp, sn_decode_stp, sn_decode_rstp,
         sn_decode_lacp, sn_decode_bgp, sn_decode_ospf2, sn_decode_isis,
         sn_decode_rip, sn_decode_hsrp, sn_decode_glbp, sn_decode_mpls,
@@ -1197,6 +1295,7 @@ int main(void)
     test_snmp_metadata_and_malformed_ber();
     test_igmp_vrrp_and_icmp();
     test_invalid_decoder_arguments();
+    test_arp_decoder();
     test_protocol_placeholders_are_inert();
     puts("protocol decoder tests passed");
     return 0;

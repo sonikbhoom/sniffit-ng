@@ -1,15 +1,19 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "sniffit_ng/capture.h"
+#include "sniffit_ng/arp_state.h"
+#include "sniffit_ng/arp_replay.h"
 #include "sniffit_ng/monitor.h"
 #include "sniffit_ng/packet_inspect.h"
 
 #include <assert.h>
+#include <dirent.h>
 #include <pcap/pcap.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #define ETHERNET_LENGTH 14U
@@ -222,6 +226,67 @@ static void create_capture(char *path, size_t path_capacity)
 }
 
 #ifdef DLT_LINUX_SLL
+static void verify_arp_sll_pipeline(void)
+{
+    char input_path[] = "/tmp/sniffit-ng-arp-sll-XXXXXX";
+    char directory[] = "/tmp/sniffit-ng-arp-sll-log-XXXXXX";
+    char output_path[256];
+    char error[256] = {0};
+    uint8_t frame[48] = {
+        [14] = 0x81U, [15] = 0x00U, [18] = 0x08U, [19] = 0x06U,
+        [21] = 1U, [22] = 0x08U, [24] = 6U, [25] = 4U, [27] = 1U,
+        [28] = 0x02U, [33] = 1U, [34] = 192U, [37] = 1U, [44] = 192U, [47] = 2U
+    };
+    struct sn_arp_config config;
+    struct sn_arp_replay_stats stats;
+    struct sn_capture *capture;
+    struct sn_capture_packet packet;
+    pcap_t *dead_capture;
+    pcap_dumper_t *dumper;
+    DIR *stream;
+    struct dirent *entry;
+    unsigned int archives = 0U;
+    int descriptor = mkstemp(input_path);
+
+    assert(descriptor >= 0 && close(descriptor) == 0);
+    assert(mkdtemp(directory) != NULL);
+    dead_capture = pcap_open_dead(DLT_LINUX_SLL, 256);
+    assert(dead_capture != NULL);
+    dumper = pcap_dump_open(dead_capture, input_path);
+    assert(dumper != NULL);
+    dump_packet(dumper, frame, sizeof(frame), sizeof(frame), 1L);
+    assert(pcap_dump_flush(dumper) == 0);
+    pcap_dump_close(dumper);
+    pcap_close(dead_capture);
+    sn_arp_config_init(&config);
+    config.rotation.address_logging = false;
+    assert(snprintf(config.log_directory, sizeof(config.log_directory), "%s", directory) > 0);
+    assert(sn_arp_replay_file(input_path, &config, &stats, error, sizeof(error)));
+    assert(stats.state.decoded == 1U && stats.state.history_count == 1U);
+    assert(sn_arp_state_at(&stats.state, 0U)->link_type == SN_PACKET_LINK_LINUX_SLL);
+    stream = opendir(directory);
+    assert(stream != NULL);
+    while ((entry = readdir(stream)) != NULL) {
+        if (entry->d_name[0] == '.') {
+            continue;
+        }
+        assert(snprintf(output_path, sizeof(output_path), "%s/%s", directory, entry->d_name) > 0);
+        if (strstr(entry->d_name, ".pcap") != NULL && strstr(entry->d_name, ".owner") == NULL) {
+            ++archives;
+            capture = sn_capture_open_offline(output_path, error, sizeof(error));
+            assert(capture != NULL);
+            assert(sn_capture_next(capture, &packet, error, sizeof(error)) == SN_CAPTURE_PACKET);
+            assert(packet.link_type == SN_PACKET_LINK_LINUX_SLL);
+            assert(packet.captured_length == sizeof(frame) && memcmp(packet.data, frame, sizeof(frame)) == 0);
+            assert(sn_capture_next(capture, &packet, error, sizeof(error)) == SN_CAPTURE_EOF);
+            sn_capture_close(capture);
+        }
+        assert(unlink(output_path) == 0);
+    }
+    assert(closedir(stream) == 0 && archives == 1U);
+    assert(rmdir(directory) == 0 && unlink(input_path) == 0);
+}
+
 static void verify_sll_inspection(void)
 {
     char path_template[] = "/tmp/sniffit-ng-sll-inspect-XXXXXX";
@@ -294,6 +359,204 @@ static void verify_sll_inspection(void)
     assert(unlink(path_template) == 0);
 }
 #endif
+
+static void verify_arp_pipeline(void)
+{
+    char path[] = "/tmp/sniffit-ng-arp-pipeline-XXXXXX";
+    char error[256] = {0};
+    uint8_t frame[42] = {
+        [12] = 0x08U, [13] = 0x06U,
+        [15] = 1U, [16] = 0x08U, [18] = 6U, [19] = 4U, [21] = 1U,
+        [22] = 0x02U, [27] = 1U, [28] = 192U, [30] = 2U, [31] = 1U,
+        [38] = 192U, [40] = 2U, [41] = 2U
+    };
+    struct sn_arp_state state;
+    struct sn_capture_packet packet;
+    struct sn_capture *capture;
+    pcap_t *dead_capture;
+    pcap_dumper_t *dumper;
+    int descriptor = mkstemp(path);
+
+    assert(descriptor >= 0);
+    assert(close(descriptor) == 0);
+    dead_capture = pcap_open_dead(DLT_EN10MB, 256);
+    assert(dead_capture != NULL);
+    dumper = pcap_dump_open(dead_capture, path);
+    assert(dumper != NULL);
+    dump_packet(dumper, frame, sizeof(frame), sizeof(frame), 1L);
+    frame[21] = 2U;
+    dump_packet(dumper, frame, sizeof(frame), sizeof(frame), 2L);
+    dump_packet(dumper, frame, sizeof(frame) - 1U, sizeof(frame), 3L);
+    frame[18] = 0U;
+    dump_packet(dumper, frame, sizeof(frame), sizeof(frame), 4L);
+    frame[13] = 0U;
+    dump_packet(dumper, frame, sizeof(frame), sizeof(frame), 5L);
+    dump_packet(dumper, frame, 13U, sizeof(frame), 6L);
+    frame[13] = 0x06U;
+    frame[18] = 6U;
+    frame[21] = 3U;
+    dump_packet(dumper, frame, sizeof(frame), sizeof(frame), 7L);
+    assert(pcap_dump_flush(dumper) == 0);
+    pcap_dump_close(dumper);
+    pcap_close(dead_capture);
+
+    capture = sn_capture_open_offline(path, error, sizeof(error));
+    assert(capture != NULL);
+    sn_arp_state_init(&state);
+    assert(sn_capture_next(capture, &packet, error, sizeof(error)) == SN_CAPTURE_PACKET);
+    assert(sn_arp_state_process(&state, &packet) == SN_PACKET_OK);
+    assert(sn_capture_next(capture, &packet, error, sizeof(error)) == SN_CAPTURE_PACKET);
+    assert(sn_arp_state_process(&state, &packet) == SN_PACKET_OK);
+    assert(sn_capture_next(capture, &packet, error, sizeof(error)) == SN_CAPTURE_PACKET);
+    assert(sn_arp_state_process(&state, &packet) == SN_PACKET_TRUNCATED);
+    assert(sn_capture_next(capture, &packet, error, sizeof(error)) == SN_CAPTURE_PACKET);
+    assert(sn_arp_state_process(&state, &packet) == SN_PACKET_MALFORMED);
+    assert(sn_capture_next(capture, &packet, error, sizeof(error)) == SN_CAPTURE_PACKET);
+    assert(sn_arp_state_process(&state, &packet) == SN_PACKET_UNSUPPORTED);
+    assert(sn_capture_next(capture, &packet, error, sizeof(error)) == SN_CAPTURE_PACKET);
+    assert(sn_arp_state_process(&state, &packet) == SN_PACKET_TRUNCATED);
+    assert(sn_capture_next(capture, &packet, error, sizeof(error)) == SN_CAPTURE_PACKET);
+    assert(sn_arp_state_process(&state, &packet) == SN_PACKET_UNSUPPORTED);
+    assert(sn_capture_next(capture, &packet, error, sizeof(error)) == SN_CAPTURE_EOF);
+    assert(state.captured == 7U && state.decoded == 2U && state.truncated == 2U);
+    assert(state.malformed == 1U && state.unsupported == 2U && state.history_count == 2U);
+    assert(sn_arp_state_at(&state, 0U)->packet.operation == 1U);
+    assert(sn_arp_state_at(&state, 0U)->packet.sender_ipv4[3] == 1U);
+    assert(sn_arp_state_at(&state, 1U)->packet.operation == 2U);
+    assert(sn_arp_state_at(&state, 1U)->timestamp.tv_sec == 2L);
+    assert(sn_arp_state_at(&state, 2U) == NULL);
+    sn_capture_close(capture);
+    {
+        char directory[] = "/tmp/sniffit-ng-arp-replay-XXXXXX";
+        char output_path[256];
+        struct sn_arp_config config;
+        struct sn_arp_replay_stats stats;
+        DIR *stream;
+        struct dirent *entry;
+        unsigned int pcap_count = 0U;
+        unsigned int address_count = 0U;
+
+        assert(mkdtemp(directory) != NULL);
+        sn_arp_config_init(&config);
+        assert(snprintf(config.log_directory, sizeof(config.log_directory), "%s", directory) > 0);
+        assert(sn_arp_replay_file(path, &config, &stats, error, sizeof(error)));
+        assert(stats.state.captured == 5U && stats.state.decoded == 2U && stats.state.unsupported == 1U);
+        assert(stats.state.truncated == 1U && stats.state.malformed == 1U && stats.non_arp == 1U);
+        assert(stats.unclassified == 1U);
+        stream = opendir(directory);
+        assert(stream != NULL);
+        while ((entry = readdir(stream)) != NULL) {
+            if (entry->d_name[0] == '.') {
+                continue;
+            }
+            assert(snprintf(output_path, sizeof(output_path), "%s/%s", directory, entry->d_name) > 0);
+            if (strstr(entry->d_name, ".pcap") != NULL && strstr(entry->d_name, ".owner") == NULL) {
+                unsigned int records = 0U;
+                enum sn_capture_result result;
+                ++pcap_count;
+                capture = sn_capture_open_offline(output_path, error, sizeof(error));
+                assert(capture != NULL);
+                while ((result = sn_capture_next(capture, &packet, error, sizeof(error))) == SN_CAPTURE_PACKET) {
+                    ++records;
+                    assert(packet.timestamp.tv_sec == (time_t)(records == 5U ? 7U : records));
+                    assert(packet.wire_length == sizeof(frame));
+                    assert(packet.captured_length == sizeof(frame) - (records == 3U ? 1U : 0U));
+                    assert(packet.data[18] == (records == 4U ? 0U : 6U));
+                }
+                assert(records == 5U && result == SN_CAPTURE_EOF);
+                sn_capture_close(capture);
+            } else if (strstr(entry->d_name, ".jsonl") != NULL &&
+                       strstr(entry->d_name, ".owner") == NULL) {
+                char line[512];
+                FILE *addresses = fopen(output_path, "r");
+                ++address_count;
+                assert(addresses != NULL && fgets(line, sizeof(line), addresses) != NULL);
+                assert(fgets(line, sizeof(line), addresses) != NULL);
+                assert(fgets(line, sizeof(line), addresses) == NULL);
+                assert(fclose(addresses) == 0);
+            }
+            assert(unlink(output_path) == 0);
+        }
+        assert(closedir(stream) == 0 && pcap_count == 1U && address_count == 1U);
+        assert(rmdir(directory) == 0);
+    }
+    {
+        char config_path[] = "/tmp/sniffit-ng-arp-cli-XXXXXX";
+        int config_fd = mkstemp(config_path);
+        FILE *config_file;
+        pid_t child;
+        int status;
+
+        assert(config_fd >= 0);
+        config_file = fdopen(config_fd, "w");
+        assert(config_file != NULL);
+        assert(fputs("packet_logging = false\naddress_logging = false\n", config_file) >= 0);
+        assert(fclose(config_file) == 0);
+        child = fork();
+        assert(child >= 0);
+        if (child == 0) {
+            assert(freopen("/dev/null", "w", stdout) != NULL);
+            execl(ARP_CLI_PATH, ARP_CLI_PATH, "--read-pcap", path, "--config", config_path,
+                  (char *)NULL);
+            _exit(127);
+        }
+        assert(waitpid(child, &status, 0) == child);
+        assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+        {
+            char directory[] = "/tmp/sniffit-ng-arp-cli-log-XXXXXX";
+            char output_path[256];
+            DIR *stream;
+            struct dirent *entry;
+            unsigned int files = 0U;
+
+            assert(mkdtemp(directory) != NULL);
+            config_file = fopen(config_path, "w");
+            assert(config_file != NULL && fprintf(config_file, "log_directory = %s\n", directory) > 0);
+            assert(fclose(config_file) == 0);
+            child = fork();
+            assert(child >= 0);
+            if (child == 0) {
+                assert(freopen("/dev/null", "w", stdout) != NULL);
+                execl(ARP_CLI_PATH, ARP_CLI_PATH, "--read-pcap", path, "--config", config_path,
+                      (char *)NULL);
+                _exit(127);
+            }
+            assert(waitpid(child, &status, 0) == child);
+            assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+            stream = opendir(directory);
+            assert(stream != NULL);
+            while ((entry = readdir(stream)) != NULL) {
+                if (entry->d_name[0] == '.') {
+                    continue;
+                }
+                ++files;
+                assert(snprintf(output_path, sizeof(output_path), "%s/%s", directory, entry->d_name) > 0);
+                assert(unlink(output_path) == 0);
+            }
+            assert(closedir(stream) == 0 && files == 4U);
+            assert(rmdir(directory) == 0);
+        }
+        assert(unlink(config_path) == 0);
+    }
+    assert(unlink(path) == 0);
+
+    frame[13] = 0x06U;
+    frame[18] = 6U;
+    frame[21] = 1U;
+    packet = (struct sn_capture_packet){
+        .data = frame, .captured_length = sizeof(frame), .wire_length = sizeof(frame),
+        .link_type = SN_PACKET_LINK_ETHERNET
+    };
+    sn_arp_state_init(&state);
+    for (size_t index = 0U; index < SN_ARP_HISTORY_CAPACITY + 2U; ++index) {
+        packet.timestamp.tv_sec = (time_t)index;
+        assert(sn_arp_state_process(&state, &packet) == SN_PACKET_OK);
+    }
+    assert(state.history_count == SN_ARP_HISTORY_CAPACITY);
+    assert(sn_arp_state_at(&state, 0U)->timestamp.tv_sec == 2L);
+    assert(sn_arp_state_at(&state, SN_ARP_HISTORY_CAPACITY - 1U)->timestamp.tv_sec ==
+           (time_t)(SN_ARP_HISTORY_CAPACITY + 1U));
+}
 
 static void verify_ssh_header_pipeline(void)
 {
@@ -552,8 +815,10 @@ int main(void)
     assert(unlink(path) == 0);
 #ifdef DLT_LINUX_SLL
     verify_sll_inspection();
+    verify_arp_sll_pipeline();
 #endif
     verify_ssh_header_pipeline();
+    verify_arp_pipeline();
     puts("capture pipeline tests passed");
     return 0;
 }
