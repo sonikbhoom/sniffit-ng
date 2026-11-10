@@ -160,7 +160,10 @@ target_link_libraries(sniffit-ng PRIVATE
 add_executable(arpwatch-ng-tui src/arp_main.c)
 target_link_libraries(arpwatch-ng-tui PRIVATE sniffit_arp)
 
-install(TARGETS sniffit-ng
+# Both applications are part of the default build; this target names them explicitly.
+add_custom_target(apps DEPENDS sniffit-ng arpwatch-ng-tui)
+
+install(TARGETS sniffit-ng arpwatch-ng-tui
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 install(PROGRAMS scripts/sniffit-ng-scanmap.py
@@ -172,6 +175,9 @@ install(FILES README.md
 )
 install(FILES sniffit-ng.conf.example
     DESTINATION ${CMAKE_INSTALL_DATADIR}/sniffit-ng
+)
+install(FILES arpwatch-ng.conf.example
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/arpwatch-ng
 )
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
@@ -436,7 +442,7 @@ set(CPACK_PACKAGE_NAME "sniffit-ng")
 set(CPACK_PACKAGE_VENDOR "Sniffit NG contributors")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Defensive network protocol monitor")
 set(CPACK_PACKAGE_DESCRIPTION
-    "Sniffit NG is a privilege-reduced network monitor with bounded Ethernet/SLL IPv4 parsing and a curses flow viewer.")
+    "Sniffit NG is a privilege-reduced network monitor with bounded Ethernet/SLL IPv4 parsing and a curses flow viewer. The package also provides arpwatch-ng-tui, an offline ARP replay and logging tool.")
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
 set(CPACK_PACKAGE_CONTACT "Sniffit NG maintainers")
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/sonikbhoom/sniffit-ng")

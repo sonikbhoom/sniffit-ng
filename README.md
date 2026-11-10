@@ -40,7 +40,7 @@ These are summaries, not complete protocol decoders. IPv6 is not yet supported. 
 
 ### Offline ARP prototype
 
-On the `arpwatch-ng-tui` branch, `arpwatch-ng-tui --read-pcap FILE --config FILE` replays Ethernet or Linux cooked v1 captures without live capture or a TUI. Use `arpwatch-ng.conf.example` as the configuration template. The configured absolute `log_directory` must already exist, be owned by the current user, and have no group or other permissions. Use a dedicated directory; segment names and their `.owner` markers are reserved for this tool.
+On the `arpwatch-ng-tui` branch, `arpwatch-ng-tui --read-pcap FILE --config FILE` replays Ethernet or Linux cooked v1 captures without live capture or a TUI. It is built, installed and packaged together with `sniffit-ng`: the default build produces both executables, `cmake --build build --target apps` names them explicitly, and the RPM/DEB install both along with `share/arpwatch-ng/arpwatch-ng.conf.example`. Use that file as the configuration template. The configured absolute `log_directory` must already exist, be owned by the current user, and have no group or other permissions. Use a dedicated directory; segment names and their `.owner` markers are reserved for this tool.
 
 The default configuration records recognizable ARP link frames to pcap and valid Ethernet/IPv4 ARP address claims to JSONL. It skips non-ARP frames and reports link headers that are too incomplete or malformed to identify; such unclassified records cannot be attributed to ARP and are not archived. The summary distinguishes decoded, truncated, malformed and unsupported ARP packets. Logging can be disabled independently, and disabled packet logging means frames are not retained.
 
