@@ -194,6 +194,17 @@ static void redraw(struct view *view, WINDOW *panel)
     (void)doupdate();
 }
 
+static void redraw_panel(struct view *view, WINDOW *panel)
+{
+    struct sn_arp_view_layout layout = sn_arp_view_layout(LINES, COLS, view->show_stats);
+
+    if (panel != NULL && !layout.too_small && view->host_count > 0U) {
+        draw_panel(panel, view, &layout);
+        (void)wnoutrefresh(panel);
+    }
+    (void)doupdate();
+}
+
 static void move_selection(struct view *view, int direction)
 {
     size_t before = view->selected;
@@ -225,6 +236,9 @@ static void run_panel(struct view *view)
     view->panel_scroll = 0U;
     redraw(view, panel);
     for (;;) {
+        bool background_changed = false;
+        bool panel_changed = false;
+
         key = getch();
         if (key == KEY_RESIZE) {
             (void)resize_term(0, 0);
@@ -234,27 +248,40 @@ static void run_panel(struct view *view)
             }
             (void)wresize(panel, LINES, layout.panel_width);
             (void)mvwin(panel, 0, layout.panel_x);
+            background_changed = true;
         } else if (key == 'n' || key == 'N') {
             view->show_stats = !view->show_stats;
+            background_changed = true;
         } else if (key == KEY_UP || key == 'k' || key == 'K') {
             move_selection(view, -1);
+            background_changed = true;
         } else if (key == KEY_DOWN || key == 'j' || key == 'J') {
             move_selection(view, 1);
+            background_changed = true;
         } else if (key == KEY_NPAGE) {
             view->panel_scroll += view->panel_page;
+            panel_changed = true;
         } else if (key == KEY_PPAGE) {
             view->panel_scroll = view->panel_scroll > view->panel_page
                 ? view->panel_scroll - view->panel_page : 0U;
+            panel_changed = true;
         } else if (key == KEY_HOME) {
             view->panel_scroll = 0U;
+            panel_changed = true;
         } else if (key == KEY_END) {
             view->panel_scroll = view->panel_max_scroll;
+            panel_changed = true;
         } else if (key == CTRL_L) {
             (void)clearok(curscr, TRUE);
+            background_changed = true;
         } else if (key != ERR) {
             break;
         }
-        redraw(view, panel);
+        if (background_changed) {
+            redraw(view, panel);
+        } else if (panel_changed) {
+            redraw_panel(view, panel);
+        }
     }
     (void)delwin(panel);
     (void)touchwin(stdscr);

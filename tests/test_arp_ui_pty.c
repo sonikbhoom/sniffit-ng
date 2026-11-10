@@ -66,6 +66,18 @@ static void write_text(const char *path, const char *text)
     assert(stream != NULL && fputs(text, stream) >= 0 && fclose(stream) == 0);
 }
 
+static void make_temp_template(char *path, size_t capacity, const char *name)
+{
+    const char *directory = getenv("TMPDIR");
+
+    if (directory == NULL || directory[0] == '\0') {
+        directory = "/tmp";
+    }
+    int length = snprintf(path, capacity, "%s/%sXXXXXX", directory, name);
+
+    assert(length > 0 && (size_t)length < capacity);
+}
+
 static void send_keys(int fd, const char *keys)
 {
     size_t length = strlen(keys);
@@ -103,10 +115,19 @@ static void screen_after(int fd, const char *keys, char *output, size_t capacity
     drain(fd, output, capacity, length, 400);
 }
 
+static void screen_after_keys(int fd, const char *keys, char *output, size_t capacity,
+                              size_t *length)
+{
+    *length = 0U;
+    output[0] = '\0';
+    send_keys(fd, keys);
+    drain(fd, output, capacity, length, 400);
+}
+
 int main(void)
 {
-    char pcap_path[] = "/tmp/sniffit-ng-arp-ui-pcap-XXXXXX";
-    char config_path[] = "/tmp/sniffit-ng-arp-ui-config-XXXXXX";
+    char pcap_path[4096];
+    char config_path[4096];
     uint8_t frame[42];
     pcap_t *dead = pcap_open_dead(DLT_EN10MB, 256);
     pcap_dumper_t *dumper;
@@ -117,9 +138,13 @@ int main(void)
     int master_fd;
     int status;
     pid_t child;
-    int pcap_fd = mkstemp(pcap_path);
-    int config_fd = mkstemp(config_path);
+    int pcap_fd;
+    int config_fd;
 
+    make_temp_template(pcap_path, sizeof(pcap_path), "a");
+    make_temp_template(config_path, sizeof(config_path), "b");
+    pcap_fd = mkstemp(pcap_path);
+    config_fd = mkstemp(config_path);
     assert(pcap_fd >= 0 && close(pcap_fd) == 0 && config_fd >= 0 && close(config_fd) == 0);
     assert(dead != NULL);
     dumper = pcap_dump_open(dead, pcap_path);
@@ -161,6 +186,12 @@ int main(void)
     assert(strstr(output, "n stats") != NULL);
     assert(strstr(output, "who-has") == NULL && strstr(output, "Packets: ARP") == NULL);
 
+    /* Ordinary page navigation must not clear the terminal between screen updates. */
+    screen_after_keys(master_fd, KEY_PGDN, output, sizeof(output), &length);
+    assert(strstr(output, "\033[2J") == NULL);
+    screen_after_keys(master_fd, KEY_PGUP, output, sizeof(output), &length);
+    assert(strstr(output, "\033[2J") == NULL);
+
     /* Statistics toggle at the bottom of the main view, like sniffit-ng. */
     screen_after(master_fd, "n", output, sizeof(output), &length);
     assert(strstr(output, "Packets: ARP 123") != NULL && strstr(output, "Alerts: talkative") != NULL);
@@ -174,6 +205,12 @@ int main(void)
     assert(strstr(output, "who-has") != NULL && strstr(output, "sweep: many distinct targets") != NULL);
     assert(strstr(output, "PgUp/PgDn scroll") != NULL);
     assert(strstr(output, "is-at") == NULL);
+
+    /* Timeline paging refreshes the overlay without a terminal-wide clear. */
+    screen_after_keys(master_fd, KEY_PGDN, output, sizeof(output), &length);
+    assert(strstr(output, "\033[2J") == NULL);
+    screen_after_keys(master_fd, KEY_HOME_APP, output, sizeof(output), &length);
+    assert(strstr(output, "\033[2J") == NULL);
 
     /* PgDn scrolls the timeline to its end instead of closing the panel. */
     screen_after(master_fd, pages, output, sizeof(output), &length);
