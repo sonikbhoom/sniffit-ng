@@ -102,3 +102,24 @@ Supersedes the 2026-10-11 handoff: the dirty worktree described there was commit
 ### Next Work
 
 Items 1-8 in the earlier Next Work list remain open, plus the new `PLAN.md` interface task for continuous detail-window refresh with prompt second-priority placement of new sessions. Resolve the Oct 11 Telnet/SSH full-decode appearance issue against the live UI before treating it as fixed.
+
+## Checkpoint — 2026-11-09 (arpwatch-ng-tui)
+
+### Repository State
+- Branch `arpwatch-ng-tui` at `7f92fdb`, pushed to `origin/arpwatch-ng-tui`; `main` is unchanged at `23cca11`. Sessions 1 and 2 of the plan (bounded ARP decoder; offline replay with rotating packet/address logs) are committed. No live ARP capture and no TUI exist yet.
+- Validation at the last code change: ASan/UBSan and GCC Release each passed 21 tests; the unprivileged live-loopback test was skipped. A separately built, capability-enabled loopback probe passed, which shows only UDP loopback capture, not ARP.
+- Plan, milestone statuses and the retention policy are in the private GitHub project `arpwatch-ng-tui` (session 1 Done, session 2 In Progress, sessions 3-5 Todo).
+
+### First Real Capture (private)
+- A 2.4-day raw ARP capture (504,790 frames, 0 kernel drops) was taken with `tcpdump` and analysed read-only. The prototype decoded every frame. Findings and open questions are recorded privately, outside the repository, because they contain real addresses; do not copy them here.
+- Summary without addresses: no IP-to-MAC conflicts; one host generates about 80% of all ARP (a fixed 33-address block polled every 11-18 s, likely a stale printer entry, unconfirmed); one host sweeps the whole /24 every hour (unidentified); one host periodically ARPs for public internet addresses (configuration check pending); the user's own three test sweeps were detectable as one sender querying at least 100 distinct targets in a minute.
+- Candidate session 3 highlight rules: talkative host, fixed-range poller, subnet sweep, off-link ARP, IP-to-MAC change, conflicting claims, unsolicited replies.
+
+### Next Work
+1. Resolve the open items about the heavy and sweeping hosts (user investigation; the private checklist tracks them).
+2. Session 3: offline TUI and configurable highlights using thresholds grounded in the capture.
+3. Parked: synthetic regression fixtures with no real addresses.
+4. Still unverified: high-traffic, real disk-full and multi-day behavior of the rotating logs; live ARP capture.
+
+### Recovery
+- Private chat snapshots and the capture live outside the repository (a snapshot directory under `~/src` and a capture directory under `$HOME`); never stage or publish them.
