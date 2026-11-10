@@ -9,10 +9,13 @@ struct sn_arp_replay_stats {
     uint64_t non_arp;
     uint64_t unclassified;
     uint64_t deleted_segments;
+    struct sn_arp_analysis *analysis;
 };
 
+/* May leave stats->analysis allocated even on failure; always call the release function. */
 bool sn_arp_replay_file(const char *path, const struct sn_arp_config *config,
                         struct sn_arp_replay_stats *stats,
                         char *error_buffer, size_t error_capacity);
+void sn_arp_replay_stats_release(struct sn_arp_replay_stats *stats);
 
 #endif

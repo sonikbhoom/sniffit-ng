@@ -9,3 +9,18 @@ idle_seconds = 0
 maximum_age_seconds = 2592000
 maximum_total_bytes = 1073741824
 delete_old_segments = true
+# Behaviour analysis (used by --hosts). A threshold of 0 disables that detector.
+# CIDR of your local network; enables off-link detection. Empty disables it.
+local_network =
+# Comma-separated host IPs treated as expected: their alerts are kept but ranked last.
+baseline_ips =
+# Requests per minute from one host that raise "talkative".
+talkative_requests_per_minute = 60
+# Distinct targets queried within sweep_window_seconds that raise "sweep" (0-512).
+sweep_targets = 100
+sweep_window_seconds = 60
+# "range-poller": at least range_poll_min_targets targets each asked range_poll_repeat times.
+range_poll_repeat = 200
+range_poll_min_targets = 3
+# Requests for addresses outside local_network before "off-link" is raised.
+off_link_min_requests = 3

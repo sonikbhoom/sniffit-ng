@@ -1,12 +1,21 @@
 #include "sniffit_ng/arp_replay.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 
 static void copy_error(char *buffer, size_t capacity, const char *message)
 {
     if (buffer != NULL && capacity > 0U) {
         (void)snprintf(buffer, capacity, "%s", message);
+    }
+}
+
+void sn_arp_replay_stats_release(struct sn_arp_replay_stats *stats)
+{
+    if (stats != NULL) {
+        free(stats->analysis);
+        stats->analysis = NULL;
     }
 }
 
@@ -25,6 +34,12 @@ bool sn_arp_replay_file(const char *path, const struct sn_arp_config *config,
         return false;
     }
     *stats = (struct sn_arp_replay_stats){0};
+    stats->analysis = calloc(1U, sizeof(*stats->analysis));
+    if (stats->analysis == NULL) {
+        copy_error(error_buffer, error_capacity, "out of memory for ARP analysis");
+        return false;
+    }
+    sn_arp_analysis_init(stats->analysis, &config->analysis);
     capture = sn_capture_open_offline(path, error_buffer, error_capacity);
     if (capture == NULL) {
         return false;
@@ -63,7 +78,10 @@ bool sn_arp_replay_file(const char *path, const struct sn_arp_config *config,
                 break;
             }
         }
-        (void)sn_arp_state_process(&stats->state, &packet);
+        if (sn_arp_state_process(&stats->state, &packet) == SN_PACKET_OK) {
+            sn_arp_analysis_observe(stats->analysis, sn_arp_state_at(
+                &stats->state, stats->state.history_count - 1U));
+        }
     }
     if (success && capture_result != SN_CAPTURE_EOF) {
         success = false;

@@ -4,7 +4,7 @@
 #include "sniffit_ng/arp.h"
 #include "sniffit_ng/capture.h"
 
-#define SN_ARP_HISTORY_CAPACITY 128U
+#define SN_ARP_HISTORY_CAPACITY 512U
 
 struct sn_arp_observation {
     struct sn_arp_packet packet;

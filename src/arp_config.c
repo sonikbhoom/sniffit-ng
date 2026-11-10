@@ -1,5 +1,6 @@
 #include "sniffit_ng/arp_config.h"
 
+#include <arpa/inet.h>
 #include <ctype.h>
 #include <errno.h>
 #include <stddef.h>
@@ -7,7 +8,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum setting_type { SETTING_DIRECTORY, SETTING_BOOL, SETTING_NUMBER };
+enum setting_type {
+    SETTING_DIRECTORY, SETTING_BOOL, SETTING_NUMBER, SETTING_CIDR, SETTING_IP_LIST
+};
 
 struct setting {
     const char *name;
@@ -17,6 +20,8 @@ struct setting {
 
 #define ROTATION_OFFSET(field) \
     (offsetof(struct sn_arp_config, rotation) + offsetof(struct sn_arp_rotation_config, field))
+#define ANALYSIS_OFFSET(field) \
+    (offsetof(struct sn_arp_config, analysis) + offsetof(struct sn_arp_analysis_config, field))
 
 static const struct setting settings[] = {
     {"log_directory", SETTING_DIRECTORY, offsetof(struct sn_arp_config, log_directory)},
@@ -28,7 +33,15 @@ static const struct setting settings[] = {
     {"idle_seconds", SETTING_NUMBER, ROTATION_OFFSET(idle_seconds)},
     {"maximum_age_seconds", SETTING_NUMBER, ROTATION_OFFSET(maximum_age_seconds)},
     {"maximum_total_bytes", SETTING_NUMBER, ROTATION_OFFSET(maximum_total_bytes)},
-    {"delete_old_segments", SETTING_BOOL, ROTATION_OFFSET(delete_old_segments)}
+    {"delete_old_segments", SETTING_BOOL, ROTATION_OFFSET(delete_old_segments)},
+    {"local_network", SETTING_CIDR, ANALYSIS_OFFSET(local_known)},
+    {"baseline_ips", SETTING_IP_LIST, ANALYSIS_OFFSET(baseline_ips)},
+    {"talkative_requests_per_minute", SETTING_NUMBER, ANALYSIS_OFFSET(talkative_requests_per_minute)},
+    {"sweep_targets", SETTING_NUMBER, ANALYSIS_OFFSET(sweep_targets)},
+    {"sweep_window_seconds", SETTING_NUMBER, ANALYSIS_OFFSET(sweep_window_seconds)},
+    {"range_poll_repeat", SETTING_NUMBER, ANALYSIS_OFFSET(range_poll_repeat)},
+    {"range_poll_min_targets", SETTING_NUMBER, ANALYSIS_OFFSET(range_poll_min_targets)},
+    {"off_link_min_requests", SETTING_NUMBER, ANALYSIS_OFFSET(off_link_min_requests)}
 };
 
 static char *trim(char *text)
@@ -62,14 +75,80 @@ void sn_arp_config_init(struct sn_arp_config *config)
     if (config != NULL) {
         *config = (struct sn_arp_config){0};
         sn_arp_rotation_config_init(&config->rotation);
+        sn_arp_analysis_config_init(&config->analysis);
+    }
+}
+
+static bool parse_cidr(const char *value, struct sn_arp_analysis_config *analysis)
+{
+    char address[INET_ADDRSTRLEN + 1U];
+    const char *slash = strchr(value, '/');
+    char *end;
+    unsigned long prefix;
+    size_t length;
+
+    if (value[0] == '\0') {
+        analysis->local_known = false;
+        return true;
+    }
+    if (slash == NULL || slash == value || !isdigit((unsigned char)slash[1])) {
+        return false;
+    }
+    length = (size_t)(slash - value);
+    if (length >= sizeof(address)) {
+        return false;
+    }
+    memcpy(address, value, length);
+    address[length] = '\0';
+    prefix = strtoul(slash + 1, &end, 10);
+    if (*end != '\0' || prefix > 32UL ||
+        inet_pton(AF_INET, address, analysis->local_network) != 1) {
+        return false;
+    }
+    analysis->local_prefix = (uint8_t)prefix;
+    analysis->local_known = true;
+    return true;
+}
+
+static bool parse_ip_list(char *value, struct sn_arp_analysis_config *analysis)
+{
+    char *entry = value;
+
+    analysis->baseline_count = 0U;
+    if (value[0] == '\0') {
+        return true;
+    }
+    for (;;) {
+        char *comma = strchr(entry, ',');
+        char *token;
+
+        if (comma != NULL) {
+            *comma = '\0';
+        }
+        token = trim(entry);
+        if (analysis->baseline_count >= SN_ARP_BASELINE_CAPACITY ||
+            inet_pton(AF_INET, token, analysis->baseline_ips[analysis->baseline_count]) != 1) {
+            return false;
+        }
+        ++analysis->baseline_count;
+        if (comma == NULL) {
+            return true;
+        }
+        entry = comma + 1;
     }
 }
 
 static bool assign_setting(struct sn_arp_config *config, const struct setting *setting,
-                           const char *value)
+                           char *value)
 {
     unsigned char *field = (unsigned char *)config + setting->offset;
 
+    if (setting->type == SETTING_CIDR) {
+        return parse_cidr(value, &config->analysis);
+    }
+    if (setting->type == SETTING_IP_LIST) {
+        return parse_ip_list(value, &config->analysis);
+    }
     if (setting->type == SETTING_DIRECTORY) {
         if (value[0] != '/' || strlen(value) >= SN_ARP_LOG_DIRECTORY_CAPACITY) {
             return false;
@@ -179,6 +258,12 @@ bool sn_arp_config_load(const char *path, struct sn_arp_config *config,
     if ((config->rotation.packet_segment_bytes > 0U && config->rotation.packet_segment_bytes < 40U) ||
         (config->rotation.address_segment_bytes > 0U && config->rotation.address_segment_bytes < 512U)) {
         set_error(error_buffer, error_capacity, "segment size is too small", 0U);
+        return false;
+    }
+    if (config->analysis.sweep_targets > SN_ARP_WINDOW_TARGET_CAPACITY ||
+        (config->analysis.sweep_targets > 0U && config->analysis.sweep_window_seconds == 0U)) {
+        set_error(error_buffer, error_capacity,
+                  "sweep_targets must be 0-512 and needs a nonzero sweep_window_seconds", 0U);
         return false;
     }
     set_error(error_buffer, error_capacity, "", 0U);

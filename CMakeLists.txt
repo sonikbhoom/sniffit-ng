@@ -114,10 +114,15 @@ target_link_libraries(sniffit_pcap_writer PUBLIC PkgConfig::PCAP)
 target_compile_definitions(sniffit_pcap_writer PRIVATE _DEFAULT_SOURCE)
 
 add_library(sniffit_arp STATIC
-    src/arp_state.c src/arp_log.c src/arp_rotation.c src/arp_config.c src/arp_replay.c
+    src/arp_state.c src/arp_log.c src/arp_rotation.c src/arp_config.c src/arp_replay.c src/arp_analysis.c
+    src/arp_view.c
 )
 target_include_directories(sniffit_arp PUBLIC include)
 target_link_libraries(sniffit_arp PUBLIC sniffit_decode sniffit_capture sniffit_pcap_writer)
+
+add_library(sniffit_arp_ui STATIC src/arp_ui.c)
+target_include_directories(sniffit_arp_ui PUBLIC include)
+target_link_libraries(sniffit_arp_ui PUBLIC sniffit_arp PkgConfig::NCURSESW)
 
 add_library(sniffit_monitor STATIC src/monitor.c)
 target_include_directories(sniffit_monitor PUBLIC include)
@@ -158,7 +163,7 @@ target_link_libraries(sniffit-ng PRIVATE
 )
 
 add_executable(arpwatch-ng-tui src/arp_main.c)
-target_link_libraries(arpwatch-ng-tui PRIVATE sniffit_arp)
+target_link_libraries(arpwatch-ng-tui PRIVATE sniffit_arp_ui)
 
 # Both applications are part of the default build; this target names them explicitly.
 add_custom_target(apps DEPENDS sniffit-ng arpwatch-ng-tui)
@@ -203,6 +208,9 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
         -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
     )
     target_compile_options(sniffit_arp PRIVATE
+        -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+    )
+    target_compile_options(sniffit_arp_ui PRIVATE
         -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
     )
     target_compile_options(sniffit_monitor PRIVATE
@@ -299,6 +307,42 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME capture_pipeline COMMAND test_capture_pipeline)
     add_test(NAME arp_cli_help COMMAND arpwatch-ng-tui --help)
+
+    add_executable(test_arp_analysis tests/test_arp_analysis.c)
+    target_link_libraries(test_arp_analysis PRIVATE sniffit_arp)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(test_arp_analysis PRIVATE
+            -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+        )
+    endif()
+    add_test(NAME arp_analysis COMMAND test_arp_analysis)
+
+    add_executable(test_arp_view tests/test_arp_view.c)
+    target_link_libraries(test_arp_view PRIVATE sniffit_arp)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(test_arp_view PRIVATE
+            -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+        )
+    endif()
+    add_test(NAME arp_view COMMAND test_arp_view)
+
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        find_library(ARP_UTIL_LIBRARY util)
+        add_executable(test_arp_ui_pty tests/test_arp_ui_pty.c)
+        target_link_libraries(test_arp_ui_pty PRIVATE sniffit_arp ${ARP_UTIL_LIBRARY})
+        target_compile_definitions(test_arp_ui_pty PRIVATE
+            ARP_CLI_PATH="$<TARGET_FILE:arpwatch-ng-tui>"
+            _DEFAULT_SOURCE
+        )
+        add_dependencies(test_arp_ui_pty arpwatch-ng-tui)
+        if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+            target_compile_options(test_arp_ui_pty PRIVATE
+                -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+            )
+        endif()
+        add_test(NAME arp_ui_pty COMMAND test_arp_ui_pty)
+        set_tests_properties(arp_ui_pty PROPERTIES TIMEOUT 30)
+    endif()
 
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_executable(test_capture_live tests/test_capture_live.c)
@@ -432,7 +476,7 @@ if(BUILD_TESTING AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND SNIFFIT_NG_ENABLE_SANITIZERS)
-    foreach(target sniffit_packet sniffit_decoder_modes sniffit_decode sniffit_flow sniffit_capture sniffit_pcap_writer sniffit_arp sniffit_monitor sniffit_payload_log sniffit_priority_log sniffit_privilege sniffit_network_info sniffit_config sniffit_ui sniffit-ng arpwatch-ng-tui test_priority_log test_ui_window test_ui_pty test_config test_network_info test_icmp_payload_view test_pcap_writer)
+    foreach(target sniffit_packet sniffit_decoder_modes sniffit_decode sniffit_flow sniffit_capture sniffit_pcap_writer sniffit_arp sniffit_arp_ui sniffit_monitor sniffit_payload_log sniffit_priority_log sniffit_privilege sniffit_network_info sniffit_config sniffit_ui sniffit-ng arpwatch-ng-tui test_priority_log test_ui_window test_ui_pty test_config test_network_info test_icmp_payload_view test_pcap_writer)
         target_compile_options(${target} PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
         target_link_options(${target} PUBLIC -fsanitize=address,undefined)
     endforeach()

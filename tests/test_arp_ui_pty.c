@@ -1,0 +1,219 @@
+#include "sniffit_ng/capture.h"
+
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
+#include <assert.h>
+#include <fcntl.h>
+#include <pcap/pcap.h>
+#include <poll.h>
+#include <pty.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#define SWEEP_TARGETS 120U
+
+/* xterm-256color key sequences in application-keypad mode (from terminfo). */
+#define KEY_PGUP "\033[5~"
+#define KEY_PGDN "\033[6~"
+#define KEY_HOME_APP "\033OH"
+#define KEY_END_APP "\033OF"
+#define KEY_UP_APP "\033OA"
+#define KEY_DOWN_APP "\033OB"
+#define CTRL_L "\014"
+
+static void make_arp(uint8_t *frame, uint8_t operation, uint8_t sender_host, uint8_t target_host)
+{
+    memset(frame, 0, 42U);
+    frame[12] = 0x08U;
+    frame[13] = 0x06U;
+    frame[15] = 1U;
+    frame[16] = 0x08U;
+    frame[18] = 6U;
+    frame[19] = 4U;
+    frame[21] = operation;
+    frame[22] = 0x02U;
+    frame[27] = sender_host;
+    frame[28] = 192U;
+    frame[29] = 168U;
+    frame[30] = 1U;
+    frame[31] = sender_host;
+    frame[38] = 192U;
+    frame[39] = 168U;
+    frame[40] = 1U;
+    frame[41] = target_host;
+}
+
+static void dump(pcap_dumper_t *dumper, const uint8_t *frame, long seconds)
+{
+    struct pcap_pkthdr header = {0};
+
+    header.ts.tv_sec = seconds;
+    header.caplen = 42U;
+    header.len = 42U;
+    pcap_dump((u_char *)dumper, &header, frame);
+}
+
+static void write_text(const char *path, const char *text)
+{
+    FILE *stream = fopen(path, "w");
+
+    assert(stream != NULL && fputs(text, stream) >= 0 && fclose(stream) == 0);
+}
+
+static void send_keys(int fd, const char *keys)
+{
+    size_t length = strlen(keys);
+
+    assert(write(fd, keys, length) == (ssize_t)length);
+}
+
+/* Reads until the terminal output has been quiet for a moment. */
+static void drain(int fd, char *output, size_t capacity, size_t *length, int quiet_ms)
+{
+    struct pollfd descriptor = {.fd = fd, .events = POLLIN};
+
+    while (*length + 1U < capacity && poll(&descriptor, 1U, quiet_ms) > 0) {
+        ssize_t bytes_read = read(fd, output + *length, capacity - *length - 1U);
+
+        if (bytes_read <= 0) {
+            break;
+        }
+        *length += (size_t)bytes_read;
+    }
+    output[*length] = '\0';
+}
+
+/* Sends keys, then Ctrl-L so ncurses repaints the whole screen, and returns that screen. */
+static void screen_after(int fd, const char *keys, char *output, size_t capacity, size_t *length)
+{
+    *length = 0U;
+    drain(fd, output, capacity, length, 100);
+    *length = 0U;
+    output[0] = '\0';
+    if (keys != NULL) {
+        send_keys(fd, keys);
+    }
+    send_keys(fd, CTRL_L);
+    drain(fd, output, capacity, length, 400);
+}
+
+int main(void)
+{
+    char pcap_path[] = "/tmp/sniffit-ng-arp-ui-pcap-XXXXXX";
+    char config_path[] = "/tmp/sniffit-ng-arp-ui-config-XXXXXX";
+    uint8_t frame[42];
+    pcap_t *dead = pcap_open_dead(DLT_EN10MB, 256);
+    pcap_dumper_t *dumper;
+    struct winsize size = {.ws_row = 24, .ws_col = 100};
+    char output[131072] = "";
+    char pages[sizeof(KEY_PGDN) * 20U] = "";
+    size_t length = 0U;
+    int master_fd;
+    int status;
+    pid_t child;
+    int pcap_fd = mkstemp(pcap_path);
+    int config_fd = mkstemp(config_path);
+
+    assert(pcap_fd >= 0 && close(pcap_fd) == 0 && config_fd >= 0 && close(config_fd) == 0);
+    assert(dead != NULL);
+    dumper = pcap_dump_open(dead, pcap_path);
+    assert(dumper != NULL);
+    /* The oldest packet of the swept host is a reply, so "is-at" only shows when its
+     * timeline is scrolled to the end. */
+    make_arp(frame, 2U, 9U, 30U);
+    dump(dumper, frame, 999L);
+    for (unsigned int target = 1U; target <= SWEEP_TARGETS; ++target) {
+        make_arp(frame, 1U, 9U, (uint8_t)target);
+        dump(dumper, frame, 1000L);
+    }
+    make_arp(frame, 1U, 20U, 5U);
+    dump(dumper, frame, 1001L);
+    make_arp(frame, 2U, 5U, 20U);
+    dump(dumper, frame, 1002L);
+    assert(pcap_dump_flush(dumper) == 0);
+    pcap_dump_close(dumper);
+    pcap_close(dead);
+    write_text(config_path,
+               "packet_logging = false\naddress_logging = false\nlocal_network = 192.168.1.0/24\n");
+    for (int page = 0; page < 20; ++page) {
+        strcat(pages, KEY_PGDN);
+    }
+
+    child = forkpty(&master_fd, NULL, NULL, &size);
+    assert(child >= 0);
+    if (child == 0) {
+        (void)setenv("TERM", "xterm-256color", 1);
+        execl(ARP_CLI_PATH, ARP_CLI_PATH, "--read-pcap", pcap_path, "--config", config_path,
+              "--tui", (char *)NULL);
+        _exit(127);
+    }
+
+    /* Main view: swept host first, no panel, statistics hidden. */
+    screen_after(master_fd, NULL, output, sizeof(output), &length);
+    assert(strstr(output, "HOST") != NULL && strstr(output, "alerting 1") != NULL);
+    assert(strstr(output, "192.168.1.9") != NULL && strstr(output, "sweep") != NULL);
+    assert(strstr(output, "n stats") != NULL);
+    assert(strstr(output, "who-has") == NULL && strstr(output, "Packets: ARP") == NULL);
+
+    /* Statistics toggle at the bottom of the main view, like sniffit-ng. */
+    screen_after(master_fd, "n", output, sizeof(output), &length);
+    assert(strstr(output, "Packets: ARP 123") != NULL && strstr(output, "Alerts: talkative") != NULL);
+    screen_after(master_fd, "n", output, sizeof(output), &length);
+    assert(strstr(output, "Packets: ARP") == NULL);
+
+    /* Enter overlays the detail panel; the oldest reply is below the first page. */
+    screen_after(master_fd, "\n", output, sizeof(output), &length);
+    assert(strstr(output, "ARP host 192.168.1.9") != NULL);
+    assert(strstr(output, "(newest first) 1-") != NULL && strstr(output, "/121") != NULL);
+    assert(strstr(output, "who-has") != NULL && strstr(output, "sweep: many distinct targets") != NULL);
+    assert(strstr(output, "PgUp/PgDn scroll") != NULL);
+    assert(strstr(output, "is-at") == NULL);
+
+    /* PgDn scrolls the timeline to its end instead of closing the panel. */
+    screen_after(master_fd, pages, output, sizeof(output), &length);
+    assert(strstr(output, "ARP host 192.168.1.9") != NULL);
+    assert(strstr(output, "-121/121") != NULL && strstr(output, "is-at") != NULL);
+
+    /* PgUp moves back a page: the oldest reply scrolls out of view. */
+    screen_after(master_fd, KEY_PGUP, output, sizeof(output), &length);
+    assert(strstr(output, "/121") != NULL && strstr(output, "-121/121") == NULL);
+    assert(strstr(output, "is-at") == NULL);
+
+    /* Home returns to the newest packets and End goes back to the oldest. */
+    screen_after(master_fd, KEY_HOME_APP, output, sizeof(output), &length);
+    assert(strstr(output, "(newest first) 1-") != NULL && strstr(output, "is-at") == NULL);
+    screen_after(master_fd, KEY_END_APP, output, sizeof(output), &length);
+    assert(strstr(output, "-121/121") != NULL && strstr(output, "is-at") != NULL);
+
+    /* The arrow keys still choose the host and reset the scroll; they do not scroll. */
+    screen_after(master_fd, KEY_DOWN_APP, output, sizeof(output), &length);
+    assert(strstr(output, "ARP host 192.168.1.20") != NULL && strstr(output, "is-at") != NULL);
+    assert(strstr(output, "/121") == NULL);
+    screen_after(master_fd, KEY_UP_APP, output, sizeof(output), &length);
+    assert(strstr(output, "ARP host 192.168.1.9") != NULL);
+    assert(strstr(output, "(newest first) 1-") != NULL && strstr(output, "is-at") == NULL);
+    screen_after(master_fd, "j", output, sizeof(output), &length);
+    assert(strstr(output, "ARP host 192.168.1.20") != NULL);
+    screen_after(master_fd, "k", output, sizeof(output), &length);
+    assert(strstr(output, "ARP host 192.168.1.9") != NULL);
+
+    /* n toggles statistics while the panel is open; any other key closes the panel. */
+    screen_after(master_fd, "n", output, sizeof(output), &length);
+    assert(strstr(output, "ARP host 192.168.1.9") != NULL && strstr(output, "Packets: ARP") != NULL);
+    screen_after(master_fd, "x", output, sizeof(output), &length);
+    assert(strstr(output, "ARP host") == NULL && strstr(output, "HOST") != NULL);
+
+    send_keys(master_fd, "q");
+    assert(waitpid(child, &status, 0) == child);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    assert(close(master_fd) == 0);
+    assert(unlink(pcap_path) == 0 && unlink(config_path) == 0);
+    puts("arp ui pty tests passed");
+    return 0;
+}

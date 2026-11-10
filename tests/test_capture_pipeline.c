@@ -264,6 +264,8 @@ static void verify_arp_sll_pipeline(void)
     assert(sn_arp_replay_file(input_path, &config, &stats, error, sizeof(error)));
     assert(stats.state.decoded == 1U && stats.state.history_count == 1U);
     assert(sn_arp_state_at(&stats.state, 0U)->link_type == SN_PACKET_LINK_LINUX_SLL);
+    assert(stats.analysis != NULL && sn_arp_analysis_host_count(stats.analysis) == 1U);
+    sn_arp_replay_stats_release(&stats);
     stream = opendir(directory);
     assert(stream != NULL);
     while ((entry = readdir(stream)) != NULL) {
@@ -443,6 +445,9 @@ static void verify_arp_pipeline(void)
         assert(stats.state.captured == 5U && stats.state.decoded == 2U && stats.state.unsupported == 1U);
         assert(stats.state.truncated == 1U && stats.state.malformed == 1U && stats.non_arp == 1U);
         assert(stats.unclassified == 1U);
+        assert(stats.analysis != NULL && stats.analysis->observed == 2U);
+        assert(sn_arp_analysis_host_count(stats.analysis) == 1U);
+        sn_arp_replay_stats_release(&stats);
         stream = opendir(directory);
         assert(stream != NULL);
         while ((entry = readdir(stream)) != NULL) {

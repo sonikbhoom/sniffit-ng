@@ -1,6 +1,7 @@
 #ifndef SNIFFIT_NG_ARP_CONFIG_H
 #define SNIFFIT_NG_ARP_CONFIG_H
 
+#include "sniffit_ng/arp_analysis.h"
 #include "sniffit_ng/arp_rotation.h"
 
 #define SN_ARP_LOG_DIRECTORY_CAPACITY 512U
@@ -8,6 +9,7 @@
 struct sn_arp_config {
     char log_directory[SN_ARP_LOG_DIRECTORY_CAPACITY];
     struct sn_arp_rotation_config rotation;
+    struct sn_arp_analysis_config analysis;
 };
 
 void sn_arp_config_init(struct sn_arp_config *config);
