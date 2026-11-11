@@ -19,5 +19,6 @@ enum sn_packet_result sn_arp_locate_link(const uint8_t *bytes, size_t length,
 enum sn_packet_result sn_arp_parse_link(const uint8_t *bytes, size_t length,
                                         enum sn_packet_link_type link_type,
                                         struct sn_arp_packet *packet);
+const char *sn_arp_bpf_filter_expression(enum sn_packet_link_type link_type);
 
 #endif

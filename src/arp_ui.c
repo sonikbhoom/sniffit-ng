@@ -11,6 +11,7 @@
 #define COLOR_BASELINE 2
 #define PANEL_MIN_TIMELINE_ROWS 3
 #define CTRL_L 12
+#define LIVE_INPUT_TIMEOUT_MS 50
 
 struct view {
     const struct sn_arp_analysis *analysis;
@@ -25,6 +26,12 @@ struct view {
     size_t panel_scroll;
     size_t panel_page;
     size_t panel_max_scroll;
+    sn_arp_ui_poll_callback poll_callback;
+    void *poll_context;
+    char *error_buffer;
+    size_t error_capacity;
+    bool live_finished;
+    bool live_failed;
 };
 
 static void put_line(WINDOW *window, int row, int column, int width, const char *text,
@@ -205,6 +212,45 @@ static void redraw_panel(struct view *view, WINDOW *panel)
     (void)doupdate();
 }
 
+static void refresh_hosts(struct view *view)
+{
+    uint8_t selected_ip[4];
+    bool preserve_selection = view->selected < view->host_count;
+
+    if (preserve_selection) {
+        memcpy(selected_ip, view->hosts[view->selected]->ip, sizeof(selected_ip));
+    }
+    view->host_count = sn_arp_analysis_sorted(view->analysis, view->hosts,
+                                               SN_ARP_HOST_CAPACITY);
+    if (preserve_selection) {
+        for (size_t index = 0U; index < view->host_count; ++index) {
+            if (memcmp(view->hosts[index]->ip, selected_ip, sizeof(selected_ip)) == 0) {
+                view->selected = index;
+                return;
+            }
+        }
+    }
+    view->selected = 0U;
+    view->first = 0U;
+}
+
+static enum sn_arp_ui_poll_result poll_live(struct view *view)
+{
+    enum sn_arp_ui_poll_result result;
+
+    result = view->poll_callback(view->poll_context, view->error_buffer,
+                                 view->error_capacity);
+    if (result == SN_ARP_UI_POLL_UPDATED) {
+        refresh_hosts(view);
+    } else if (result == SN_ARP_UI_POLL_STOPPED) {
+        view->live_finished = true;
+    } else if (result == SN_ARP_UI_POLL_FAILED) {
+        view->live_finished = true;
+        view->live_failed = true;
+    }
+    return result;
+}
+
 static void move_selection(struct view *view, int direction)
 {
     size_t before = view->selected;
@@ -240,6 +286,17 @@ static void run_panel(struct view *view)
         bool panel_changed = false;
 
         key = getch();
+        if (key == ERR && view->poll_callback != NULL) {
+            enum sn_arp_ui_poll_result result = poll_live(view);
+
+            if (result == SN_ARP_UI_POLL_UPDATED) {
+                redraw(view, panel);
+            } else if (result == SN_ARP_UI_POLL_STOPPED ||
+                       result == SN_ARP_UI_POLL_FAILED) {
+                break;
+            }
+            continue;
+        }
         if (key == KEY_RESIZE) {
             (void)resize_term(0, 0);
             layout = sn_arp_view_layout(LINES, COLS, view->show_stats);
@@ -287,8 +344,10 @@ static void run_panel(struct view *view)
     (void)touchwin(stdscr);
 }
 
-int sn_arp_ui_run(const struct sn_arp_analysis *analysis, const struct sn_arp_state *state,
-                  const struct sn_arp_view_totals *totals)
+static int run_view(const struct sn_arp_analysis *analysis, const struct sn_arp_state *state,
+                    const struct sn_arp_view_totals *totals,
+                    sn_arp_ui_poll_callback poll_callback, void *poll_context,
+                    char *error_buffer, size_t error_capacity)
 {
     struct view view = {0};
     struct sn_arp_view_totals empty = {0};
@@ -301,12 +360,17 @@ int sn_arp_ui_run(const struct sn_arp_analysis *analysis, const struct sn_arp_st
     view.state = state;
     view.totals = totals != NULL ? totals : &empty;
     view.host_count = sn_arp_analysis_sorted(analysis, view.hosts, SN_ARP_HOST_CAPACITY);
+    view.poll_callback = poll_callback;
+    view.poll_context = poll_context;
+    view.error_buffer = error_buffer;
+    view.error_capacity = error_capacity;
     if (initscr() == NULL) {
         return 1;
     }
     (void)cbreak();
     (void)noecho();
     (void)keypad(stdscr, TRUE);
+    (void)wtimeout(stdscr, poll_callback != NULL ? LIVE_INPUT_TIMEOUT_MS : -1);
     (void)curs_set(0);
     if (has_colors()) {
         (void)start_color();
@@ -319,9 +383,23 @@ int sn_arp_ui_run(const struct sn_arp_analysis *analysis, const struct sn_arp_st
         struct sn_arp_view_layout layout = sn_arp_view_layout(LINES, COLS, view.show_stats);
         size_t page = layout.visible_rows > 1 ? (size_t)layout.visible_rows - 1U : 1U;
 
+        if (view.live_finished) {
+            break;
+        }
         redraw(&view, NULL);
         key = getch();
-        if (key == 'q' || key == 'Q' || key == ERR) {
+        if (key == ERR && poll_callback != NULL) {
+            enum sn_arp_ui_poll_result result = poll_live(&view);
+
+            if (result == SN_ARP_UI_POLL_UPDATED) {
+                redraw(&view, NULL);
+            } else if (result == SN_ARP_UI_POLL_STOPPED ||
+                       result == SN_ARP_UI_POLL_FAILED) {
+                break;
+            }
+            continue;
+        }
+        if (key == 'q' || key == 'Q' || (key == ERR && poll_callback == NULL)) {
             break;
         }
         if (key == KEY_RESIZE) {
@@ -346,7 +424,31 @@ int sn_arp_ui_run(const struct sn_arp_analysis *analysis, const struct sn_arp_st
         } else if (key == '\n' || key == '\r' || key == KEY_ENTER) {
             run_panel(&view);
         }
+        if (view.live_finished) {
+            break;
+        }
     }
     (void)endwin();
-    return 0;
+    return view.live_failed ? 1 : 0;
+}
+
+int sn_arp_ui_run(const struct sn_arp_analysis *analysis, const struct sn_arp_state *state,
+                  const struct sn_arp_view_totals *totals)
+{
+    return run_view(analysis, state, totals, NULL, NULL, NULL, 0U);
+}
+
+int sn_arp_ui_run_live(struct sn_arp_replay_stats *stats,
+                       struct sn_arp_view_totals *totals,
+                       sn_arp_ui_poll_callback poll_callback, void *poll_context,
+                       char *error_buffer, size_t error_capacity)
+{
+    if (stats == NULL || stats->analysis == NULL || poll_callback == NULL) {
+        if (error_buffer != NULL && error_capacity > 0U) {
+            (void)snprintf(error_buffer, error_capacity, "invalid live ARP viewer arguments");
+        }
+        return 1;
+    }
+    return run_view(stats->analysis, &stats->state, totals, poll_callback,
+                    poll_context, error_buffer, error_capacity);
 }

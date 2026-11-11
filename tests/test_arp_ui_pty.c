@@ -1,4 +1,6 @@
 #include "sniffit_ng/capture.h"
+#include "sniffit_ng/arp_ui.h"
+#include "test_temp.h"
 
 #ifdef NDEBUG
 #undef NDEBUG
@@ -66,18 +68,6 @@ static void write_text(const char *path, const char *text)
     assert(stream != NULL && fputs(text, stream) >= 0 && fclose(stream) == 0);
 }
 
-static void make_temp_template(char *path, size_t capacity, const char *name)
-{
-    const char *directory = getenv("TMPDIR");
-
-    if (directory == NULL || directory[0] == '\0') {
-        directory = "/tmp";
-    }
-    int length = snprintf(path, capacity, "%s/%sXXXXXX", directory, name);
-
-    assert(length > 0 && (size_t)length < capacity);
-}
-
 static void send_keys(int fd, const char *keys)
 {
     size_t length = strlen(keys);
@@ -124,6 +114,99 @@ static void screen_after_keys(int fd, const char *keys, char *output, size_t cap
     drain(fd, output, capacity, length, 400);
 }
 
+struct live_ui_test_context {
+    struct sn_arp_capture_session *session;
+    struct sn_arp_view_totals *totals;
+    int trigger_fd;
+};
+
+static enum sn_arp_ui_poll_result inject_live_arp(void *opaque, char *error_buffer,
+                                                   size_t error_capacity)
+{
+    struct live_ui_test_context *context = opaque;
+    uint8_t frame[42];
+    char trigger;
+    struct sn_capture_packet packet = {0};
+
+    if (read(context->trigger_fd, &trigger, sizeof(trigger)) != (ssize_t)sizeof(trigger)) {
+        return SN_ARP_UI_POLL_IDLE;
+    }
+    make_arp(frame, 1U, 9U, 30U);
+    packet.data = frame;
+    packet.captured_length = sizeof(frame);
+    packet.wire_length = sizeof(frame);
+    packet.link_type = SN_PACKET_LINK_ETHERNET;
+    packet.timestamp.tv_sec = time(NULL);
+    if (!sn_arp_capture_session_process(context->session, &packet,
+                                        packet.timestamp.tv_sec,
+                                        error_buffer, error_capacity)) {
+        return SN_ARP_UI_POLL_FAILED;
+    }
+    context->totals->arp_packets = 1U;
+    context->totals->decoded = 1U;
+    return SN_ARP_UI_POLL_UPDATED;
+}
+
+static void test_live_view_updates(void)
+{
+    struct winsize terminal_size = {.ws_row = 24, .ws_col = 100};
+    char output[32768] = "";
+    size_t output_length = 0U;
+    int trigger_pipe[2];
+    int master_fd;
+    int status;
+    pid_t child;
+
+    assert(pipe(trigger_pipe) == 0);
+    assert(fcntl(trigger_pipe[0], F_SETFL, O_NONBLOCK) == 0);
+    child = forkpty(&master_fd, NULL, NULL, &terminal_size);
+    assert(child >= 0);
+    if (child == 0) {
+        struct sn_arp_config config;
+        struct sn_arp_capture_session *session;
+        struct sn_arp_replay_stats *stats;
+        struct sn_arp_view_totals totals = {.source = "test-interface"};
+        struct live_ui_test_context context;
+        char error[256] = {0};
+        int result;
+
+        (void)close(trigger_pipe[1]);
+        (void)setenv("TERM", "xterm-256color", 1);
+        sn_arp_config_init(&config);
+        config.rotation.packet_logging = false;
+        config.rotation.address_logging = false;
+        session = sn_arp_capture_session_open(&config, error, sizeof(error));
+        assert(session != NULL);
+        stats = sn_arp_capture_session_stats(session);
+        context = (struct live_ui_test_context){
+            .session = session,
+            .totals = &totals,
+            .trigger_fd = trigger_pipe[0]
+        };
+        result = sn_arp_ui_run_live(stats, &totals, inject_live_arp, &context,
+                                    error, sizeof(error));
+        assert(sn_arp_capture_session_finish(session, error, sizeof(error)));
+        assert(stats->state.decoded == 1U);
+        stats->analysis = NULL;
+        sn_arp_capture_session_release(session);
+        _exit(result);
+    }
+
+    assert(close(trigger_pipe[0]) == 0);
+    screen_after(master_fd, NULL, output, sizeof(output), &output_length);
+    assert(strstr(output, "HOST") != NULL && strstr(output, "test-interface") != NULL);
+    assert(strstr(output, "192.168.1.9") == NULL);
+    assert(write(trigger_pipe[1], "x", 1U) == 1);
+    screen_after(master_fd, NULL, output, sizeof(output), &output_length);
+    assert(strstr(output, "192.168.1.9") != NULL);
+    screen_after(master_fd, "n", output, sizeof(output), &output_length);
+    assert(strstr(output, "Packets: ARP 1") != NULL);
+    send_keys(master_fd, "q");
+    assert(waitpid(child, &status, 0) == child);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    assert(close(trigger_pipe[1]) == 0 && close(master_fd) == 0);
+}
+
 int main(void)
 {
     char pcap_path[4096];
@@ -141,8 +224,8 @@ int main(void)
     int pcap_fd;
     int config_fd;
 
-    make_temp_template(pcap_path, sizeof(pcap_path), "a");
-    make_temp_template(config_path, sizeof(config_path), "b");
+    assert(sn_test_temp_template(pcap_path, sizeof(pcap_path), "a"));
+    assert(sn_test_temp_template(config_path, sizeof(config_path), "b"));
     pcap_fd = mkstemp(pcap_path);
     config_fd = mkstemp(config_path);
     assert(pcap_fd >= 0 && close(pcap_fd) == 0 && config_fd >= 0 && close(config_fd) == 0);
@@ -251,6 +334,7 @@ int main(void)
     assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
     assert(close(master_fd) == 0);
     assert(unlink(pcap_path) == 0 && unlink(config_path) == 0);
+    test_live_view_updates();
     puts("arp ui pty tests passed");
     return 0;
 }

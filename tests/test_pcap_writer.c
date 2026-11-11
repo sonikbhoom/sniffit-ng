@@ -5,6 +5,7 @@
 #include "sniffit_ng/arp_config.h"
 #include "sniffit_ng/arp_rotation.h"
 #include "sniffit_ng/pcap_writer.h"
+#include "test_temp.h"
 
 #include <assert.h>
 #include <dirent.h>
@@ -21,9 +22,11 @@
 
 static void make_temporary_path(char *path, size_t capacity)
 {
-    char template[] = "/tmp/sniffit-ng-write-pcap-XXXXXX";
-    int descriptor = mkstemp(template);
+    char template[4096];
+    int descriptor;
 
+    assert(sn_test_temp_template(template, sizeof(template), "sniffit-ng-write-pcap"));
+    descriptor = mkstemp(template);
     assert(descriptor >= 0);
     assert(close(descriptor) == 0);
     assert(unlink(template) == 0);
@@ -34,7 +37,7 @@ static void test_round_trip_link_type(enum sn_packet_link_type link_type,
                                       size_t captured_length)
 {
     uint8_t bytes[24];
-    char path[64];
+    char path[4096];
     char error[256] = {0};
     struct sn_capture_packet packet = {0};
     struct sn_capture_packet read_packet;
@@ -77,7 +80,7 @@ static void test_round_trip_link_type(enum sn_packet_link_type link_type,
 static void test_invalid_writer_inputs(void)
 {
     uint8_t bytes[1] = {0U};
-    char path[64];
+    char path[4096];
     char error[256] = {0};
     struct sn_pcap_writer *writer;
     struct sn_capture_packet packet = {0};
@@ -171,7 +174,7 @@ static void test_arp_logs(void)
 
 static void test_arp_rotation(void)
 {
-    char directory[] = "/tmp/sniffit-ng-arp-rotation-XXXXXX";
+    char directory[4096];
     char error[256];
     char path[256];
     uint8_t bytes[42] = {
@@ -191,6 +194,7 @@ static void test_arp_rotation(void)
     unsigned int addresses = 0U;
     struct stat info;
 
+    assert(sn_test_temp_template(directory, sizeof(directory), "sniffit-ng-arp-rotation"));
     assert(mkdtemp(directory) != NULL);
     sn_arp_rotation_config_init(&config);
     config.packet_segment_bytes = 140U;
@@ -232,7 +236,7 @@ static void test_arp_rotation(void)
 
 static void test_arp_retention(void)
 {
-    char directory[] = "/tmp/sniffit-ng-arp-retention-XXXXXX";
+    char directory[4096];
     char error[256];
     char path[256];
     uint8_t bytes[42] = {
@@ -250,6 +254,7 @@ static void test_arp_retention(void)
     unsigned int packets = 0U;
     FILE *unrelated;
 
+    assert(sn_test_temp_template(directory, sizeof(directory), "sniffit-ng-arp-retention"));
     assert(mkdtemp(directory) != NULL);
     assert(snprintf(path, sizeof(path), "%s/keep.txt", directory) > 0);
     unrelated = fopen(path, "w");
@@ -305,7 +310,7 @@ static void test_arp_retention(void)
 
 static void test_arp_marker_collision(void)
 {
-    char directory[] = "/tmp/sniffit-ng-arp-marker-XXXXXX";
+    char directory[4096];
     char marker[256];
     char pcap_path[256];
     char error[256];
@@ -321,6 +326,7 @@ static void test_arp_marker_collision(void)
     struct sn_arp_rotation *rotation;
     FILE *stream;
 
+    assert(sn_test_temp_template(directory, sizeof(directory), "sniffit-ng-arp-marker"));
     assert(mkdtemp(directory) != NULL);
     assert(snprintf(pcap_path, sizeof(pcap_path),
                     "%s/arpwatch-packets-00000000000000000100-000000.pcap", directory) > 0);
@@ -338,7 +344,7 @@ static void test_arp_marker_collision(void)
 
 static void test_arp_idle_and_shared_limit(void)
 {
-    char directory[] = "/tmp/sniffit-ng-arp-idle-XXXXXX";
+    char directory[4096];
     char path[256];
     char error[256];
     uint8_t bytes[42] = {
@@ -357,6 +363,7 @@ static void test_arp_idle_and_shared_limit(void)
     uint64_t total = 0U;
     struct stat info;
 
+    assert(sn_test_temp_template(directory, sizeof(directory), "sniffit-ng-arp-idle"));
     assert(mkdtemp(directory) != NULL);
     sn_arp_rotation_config_init(&config);
     config.address_logging = false;
@@ -418,7 +425,7 @@ static void test_arp_idle_and_shared_limit(void)
 
 static void test_arp_log_write_failure(void)
 {
-    char path[64];
+    char path[4096];
     pid_t child;
     int status;
 
@@ -450,7 +457,7 @@ static void test_arp_log_write_failure(void)
 
 static void test_arp_config(void)
 {
-    char path[64];
+    char path[4096];
     char error[256];
     struct sn_arp_config config;
     FILE *stream;

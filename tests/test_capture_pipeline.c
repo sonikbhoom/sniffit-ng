@@ -5,6 +5,7 @@
 #include "sniffit_ng/arp_replay.h"
 #include "sniffit_ng/monitor.h"
 #include "sniffit_ng/packet_inspect.h"
+#include "test_temp.h"
 
 #include <assert.h>
 #include <dirent.h>
@@ -157,7 +158,7 @@ static char *inspect_packet(const struct sn_capture_packet *packet,
 
 static void create_capture(char *path, size_t path_capacity)
 {
-    char path_template[] = "/tmp/sniffit-ng-pipeline-XXXXXX";
+    char path_template[4096];
     uint8_t frame[DNS_FRAME_CAPACITY];
     uint8_t response[sizeof(dns_query) + 16U];
     uint8_t malformed_dns[18] = {
@@ -168,8 +169,10 @@ static void create_capture(char *path, size_t path_capacity)
     size_t dns_frame_length;
     pcap_t *dead_capture;
     pcap_dumper_t *dumper;
-    int descriptor = mkstemp(path_template);
+    int descriptor;
 
+    assert(sn_test_temp_template(path_template, sizeof(path_template), "sniffit-ng-pipeline"));
+    descriptor = mkstemp(path_template);
     assert(descriptor >= 0);
     assert(close(descriptor) == 0);
     assert(snprintf(path, path_capacity, "%s", path_template) > 0);
@@ -228,8 +231,8 @@ static void create_capture(char *path, size_t path_capacity)
 #ifdef DLT_LINUX_SLL
 static void verify_arp_sll_pipeline(void)
 {
-    char input_path[] = "/tmp/sniffit-ng-arp-sll-XXXXXX";
-    char directory[] = "/tmp/sniffit-ng-arp-sll-log-XXXXXX";
+    char input_path[4096];
+    char directory[4096];
     char output_path[256];
     char error[256] = {0};
     uint8_t frame[48] = {
@@ -246,8 +249,11 @@ static void verify_arp_sll_pipeline(void)
     DIR *stream;
     struct dirent *entry;
     unsigned int archives = 0U;
-    int descriptor = mkstemp(input_path);
+    int descriptor;
 
+    assert(sn_test_temp_template(input_path, sizeof(input_path), "sniffit-ng-arp-sll"));
+    assert(sn_test_temp_template(directory, sizeof(directory), "sniffit-ng-arp-sll-log"));
+    descriptor = mkstemp(input_path);
     assert(descriptor >= 0 && close(descriptor) == 0);
     assert(mkdtemp(directory) != NULL);
     dead_capture = pcap_open_dead(DLT_LINUX_SLL, 256);
@@ -291,7 +297,7 @@ static void verify_arp_sll_pipeline(void)
 
 static void verify_sll_inspection(void)
 {
-    char path_template[] = "/tmp/sniffit-ng-sll-inspect-XXXXXX";
+    char path_template[4096];
     uint8_t frame[16U + IPV4_LENGTH + TCP_LENGTH] = {0};
     uint8_t *ip = frame + 16U;
     uint8_t *tcp = ip + IPV4_LENGTH;
@@ -303,8 +309,10 @@ static void verify_sll_inspection(void)
     pcap_t *dead_capture;
     pcap_dumper_t *dumper;
     FILE *stream;
-    int descriptor = mkstemp(path_template);
+    int descriptor;
 
+    assert(sn_test_temp_template(path_template, sizeof(path_template), "sniffit-ng-sll-inspect"));
+    descriptor = mkstemp(path_template);
     assert(descriptor >= 0);
     assert(close(descriptor) == 0);
     frame[1] = 4U;
@@ -364,7 +372,7 @@ static void verify_sll_inspection(void)
 
 static void verify_arp_pipeline(void)
 {
-    char path[] = "/tmp/sniffit-ng-arp-pipeline-XXXXXX";
+    char path[4096];
     char error[256] = {0};
     uint8_t frame[42] = {
         [12] = 0x08U, [13] = 0x06U,
@@ -377,8 +385,10 @@ static void verify_arp_pipeline(void)
     struct sn_capture *capture;
     pcap_t *dead_capture;
     pcap_dumper_t *dumper;
-    int descriptor = mkstemp(path);
+    int descriptor;
 
+    assert(sn_test_temp_template(path, sizeof(path), "sniffit-ng-arp-pipeline"));
+    descriptor = mkstemp(path);
     assert(descriptor >= 0);
     assert(close(descriptor) == 0);
     dead_capture = pcap_open_dead(DLT_EN10MB, 256);
@@ -429,7 +439,7 @@ static void verify_arp_pipeline(void)
     assert(sn_arp_state_at(&state, 2U) == NULL);
     sn_capture_close(capture);
     {
-        char directory[] = "/tmp/sniffit-ng-arp-replay-XXXXXX";
+        char directory[4096];
         char output_path[256];
         struct sn_arp_config config;
         struct sn_arp_replay_stats stats;
@@ -438,6 +448,7 @@ static void verify_arp_pipeline(void)
         unsigned int pcap_count = 0U;
         unsigned int address_count = 0U;
 
+        assert(sn_test_temp_template(directory, sizeof(directory), "sniffit-ng-arp-replay"));
         assert(mkdtemp(directory) != NULL);
         sn_arp_config_init(&config);
         assert(snprintf(config.log_directory, sizeof(config.log_directory), "%s", directory) > 0);
@@ -486,12 +497,14 @@ static void verify_arp_pipeline(void)
         assert(rmdir(directory) == 0);
     }
     {
-        char config_path[] = "/tmp/sniffit-ng-arp-cli-XXXXXX";
-        int config_fd = mkstemp(config_path);
+        char config_path[4096];
+        int config_fd;
         FILE *config_file;
         pid_t child;
         int status;
 
+        assert(sn_test_temp_template(config_path, sizeof(config_path), "sniffit-ng-arp-cli"));
+        config_fd = mkstemp(config_path);
         assert(config_fd >= 0);
         config_file = fdopen(config_fd, "w");
         assert(config_file != NULL);
@@ -508,12 +521,13 @@ static void verify_arp_pipeline(void)
         assert(waitpid(child, &status, 0) == child);
         assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
         {
-            char directory[] = "/tmp/sniffit-ng-arp-cli-log-XXXXXX";
+            char directory[4096];
             char output_path[256];
             DIR *stream;
             struct dirent *entry;
             unsigned int files = 0U;
 
+            assert(sn_test_temp_template(directory, sizeof(directory), "sniffit-ng-arp-cli-log"));
             assert(mkdtemp(directory) != NULL);
             config_file = fopen(config_path, "w");
             assert(config_file != NULL && fprintf(config_file, "log_directory = %s\n", directory) > 0);
@@ -565,7 +579,7 @@ static void verify_arp_pipeline(void)
 
 static void verify_ssh_header_pipeline(void)
 {
-    char path_template[] = "/tmp/sniffit-ng-ssh-pipeline-XXXXXX";
+    char path_template[4096];
     uint8_t frame[FRAME_LENGTH + 4U] = {0};
     uint8_t *ip = frame + ETHERNET_LENGTH;
     uint8_t *tcp = ip + IPV4_LENGTH;
@@ -576,9 +590,11 @@ static void verify_ssh_header_pipeline(void)
     struct sn_monitor *monitor = calloc(1U, sizeof(*monitor));
     pcap_t *dead_capture;
     pcap_dumper_t *dumper;
-    int descriptor = mkstemp(path_template);
+    int descriptor;
 
     assert(monitor != NULL);
+    assert(sn_test_temp_template(path_template, sizeof(path_template), "sniffit-ng-ssh-pipeline"));
+    descriptor = mkstemp(path_template);
     assert(descriptor >= 0);
     assert(close(descriptor) == 0);
     write_be16(frame + 12U, 0x0800U);

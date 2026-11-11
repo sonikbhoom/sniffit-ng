@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "sniffit_ng/config.h"
+#include "test_temp.h"
 
 #ifdef NDEBUG
 #undef NDEBUG
@@ -13,10 +14,12 @@
 
 static void write_config_file(char *path, const char *contents)
 {
-    char template[] = "/tmp/sniffit-ng-config-XXXXXX";
-    int descriptor = mkstemp(template);
+    char template[4096];
+    int descriptor;
     FILE *stream;
 
+    assert(sn_test_temp_template(template, sizeof(template), "sniffit-ng-config"));
+    descriptor = mkstemp(template);
     assert(descriptor >= 0);
     stream = fdopen(descriptor, "w");
     assert(stream != NULL);

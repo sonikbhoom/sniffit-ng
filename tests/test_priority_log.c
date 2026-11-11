@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "sniffit_ng/priority_log.h"
+#include "test_temp.h"
 
 #ifdef NDEBUG
 #undef NDEBUG
@@ -148,9 +149,9 @@ int main(void)
         {.protocol = 6U, .port = 22U},
         {.protocol = 17U, .port = 53U}
     };
-    char directory[] = "/tmp/sniffit-priority-log-XXXXXX";
-    char path[128];
-    char link[128];
+    char directory[4096];
+    char path[8192];
+    char link[8192];
     char error[256];
     uint8_t frame[128];
     struct sn_capture_packet packet;
@@ -158,6 +159,7 @@ int main(void)
     struct stat info;
     char *contents;
 
+    assert(sn_test_temp_template(directory, sizeof(directory), "sniffit-priority-log"));
     assert(mkdtemp(directory) != NULL);
     (void)snprintf(path, sizeof(path), "%s/priority.jsonl", directory);
     (void)snprintf(link, sizeof(link), "%s/link.jsonl", directory);

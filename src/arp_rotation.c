@@ -37,6 +37,10 @@ struct sn_arp_rotation {
     struct sn_arp_segment addresses;
     unsigned int sequence;
     uint64_t deleted;
+    uint64_t retained_bytes;
+    time_t retention_scan_time;
+    bool retention_scan_valid;
+    bool retention_age_expired;
     bool failed;
 };
 
@@ -296,6 +300,13 @@ static bool managed_name(const char *name, uint64_t *created, unsigned int *sequ
 
 static bool enforce_retention(struct sn_arp_rotation *rotation, time_t now, uint64_t incoming)
 {
+    if (rotation->retention_scan_valid && rotation->retention_scan_time == now &&
+        !rotation->retention_age_expired &&
+        (rotation->config.maximum_total_bytes == 0U ||
+         (rotation->retained_bytes <= rotation->config.maximum_total_bytes &&
+          incoming <= rotation->config.maximum_total_bytes - rotation->retained_bytes))) {
+        return true;
+    }
     for (;;) {
         int descriptor = openat(rotation->directory_fd, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
         DIR *directory;
@@ -374,9 +385,17 @@ static bool enforce_retention(struct sn_arp_rotation *rotation, time_t now, uint
         if (!expired && (rotation->config.maximum_total_bytes == 0U ||
             (total <= rotation->config.maximum_total_bytes &&
              incoming <= rotation->config.maximum_total_bytes - total))) {
+            rotation->retained_bytes = total;
+            rotation->retention_scan_time = now;
+            rotation->retention_scan_valid = true;
+            rotation->retention_age_expired = false;
             return true;
         }
         if (!rotation->config.delete_old_segments || oldest[0] == '\0') {
+            rotation->retained_bytes = total;
+            rotation->retention_scan_time = now;
+            rotation->retention_scan_valid = true;
+            rotation->retention_age_expired = expired;
             return false;
         }
         {
@@ -402,6 +421,7 @@ static bool write_segment(struct sn_arp_rotation *rotation, struct sn_arp_segmen
     uint64_t extra = packets ? 16U + (uint64_t)packet->captured_length : ARP_ADDRESS_RECORD_MAX;
     uint64_t limit = packets ? rotation->config.packet_segment_bytes :
                                rotation->config.address_segment_bytes;
+    uint64_t previous_size;
     struct stat info;
 
     if (limit > 0U && (extra > limit || (packets && extra > limit - 24U))) {
@@ -411,6 +431,7 @@ static bool write_segment(struct sn_arp_rotation *rotation, struct sn_arp_segmen
         !close_segment(segment)) {
         return false;
     }
+    previous_size = segment->log != NULL ? segment->size : 0U;
     if (!enforce_retention(rotation, now, extra + (segment->log == NULL && packets ? 24U : 0U))) {
         return false;
     }
@@ -422,6 +443,13 @@ static bool write_segment(struct sn_arp_rotation *rotation, struct sn_arp_segmen
         return false;
     }
     segment->size = (uint64_t)info.st_size;
+    if (rotation->retention_scan_valid) {
+        if (segment->size < previous_size ||
+            UINT64_MAX - rotation->retained_bytes < segment->size - previous_size) {
+            return false;
+        }
+        rotation->retained_bytes += segment->size - previous_size;
+    }
     segment->last_write = now;
     return true;
 }

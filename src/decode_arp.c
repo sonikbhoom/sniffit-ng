@@ -110,6 +110,27 @@ enum sn_packet_result sn_arp_parse_link(const uint8_t *bytes, size_t length,
     return sn_arp_parse(bytes + offset, length - offset, packet);
 }
 
+const char *sn_arp_bpf_filter_expression(enum sn_packet_link_type link_type)
+{
+    if (link_type == SN_PACKET_LINK_ETHERNET) {
+        return "link[12:2] = 0x0806 or "
+               "((link[12:2] = 0x8100 or link[12:2] = 0x88a8 or link[12:2] = 0x9100) and "
+               "link[16:2] = 0x0806) or "
+               "((link[12:2] = 0x8100 or link[12:2] = 0x88a8 or link[12:2] = 0x9100) and "
+               "(link[16:2] = 0x8100 or link[16:2] = 0x88a8 or link[16:2] = 0x9100) and "
+               "link[20:2] = 0x0806)";
+    }
+    if (link_type == SN_PACKET_LINK_LINUX_SLL) {
+        return "link[14:2] = 0x0806 or "
+               "((link[14:2] = 0x8100 or link[14:2] = 0x88a8 or link[14:2] = 0x9100) and "
+               "link[18:2] = 0x0806) or "
+               "((link[14:2] = 0x8100 or link[14:2] = 0x88a8 or link[14:2] = 0x9100) and "
+               "(link[18:2] = 0x8100 or link[18:2] = 0x88a8 or link[18:2] = 0x9100) and "
+               "link[22:2] = 0x0806)";
+    }
+    return NULL;
+}
+
 bool sn_decode_arp(const uint8_t *bytes, size_t length, char *output, size_t output_capacity)
 {
     struct sn_arp_packet packet;

@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "sniffit_ng/arp_analysis.h"
+#include "test_temp.h"
 #include "sniffit_ng/arp_config.h"
 
 #ifdef NDEBUG
@@ -338,11 +339,13 @@ static void write_config(const char *path, const char *text)
 
 static void test_analysis_config(void)
 {
-    char template[] = "/tmp/sniffit-ng-arp-analysis-XXXXXX";
+    char template[4096];
     char error[256];
     struct sn_arp_config config;
-    int descriptor = mkstemp(template);
+    int descriptor;
 
+    assert(sn_test_temp_template(template, sizeof(template), "sniffit-ng-arp-analysis"));
+    descriptor = mkstemp(template);
     assert(descriptor >= 0 && close(descriptor) == 0);
     write_config(template, "packet_logging = false\naddress_logging = false\n");
     assert(sn_arp_config_load(template, &config, error, sizeof(error)));

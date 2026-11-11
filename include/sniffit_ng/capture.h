@@ -17,6 +17,12 @@ enum sn_capture_result {
 
 struct sn_capture;
 
+struct sn_capture_stats {
+    uint64_t received;
+    uint64_t dropped;
+    uint64_t interface_dropped;
+};
+
 bool sn_capture_get_link_type(const struct sn_capture *capture,
                               enum sn_packet_link_type *link_type);
 
@@ -41,10 +47,20 @@ struct sn_capture *sn_capture_open_live(
     char *error_buffer,
     size_t error_buffer_size);
 
+bool sn_capture_set_filter(struct sn_capture *capture,
+                           const char *expression,
+                           char *error_buffer,
+                           size_t error_buffer_size);
+
 bool sn_capture_set_nonblocking(
     struct sn_capture *capture,
     char *error_buffer,
     size_t error_buffer_size);
+
+bool sn_capture_get_stats(struct sn_capture *capture,
+                          struct sn_capture_stats *stats,
+                          char *error_buffer,
+                          size_t error_buffer_size);
 
 int sn_capture_selectable_fd(const struct sn_capture *capture);
 enum sn_packet_link_type sn_capture_link_type(const struct sn_capture *capture);
