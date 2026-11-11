@@ -91,8 +91,8 @@ static void test_rotation(const char *directory,
                           size_t frame_size)
 {
     const struct sn_priority_log_limits limits = {.max_bytes = 300UL, .keep = 2U};
-    char path[128];
-    char name[160];
+    char path[8192];
+    char name[8200];
     char error[256];
     struct sn_priority_log *log;
     struct sn_capture_packet packet;
