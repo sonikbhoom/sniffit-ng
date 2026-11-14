@@ -131,7 +131,16 @@ static enum sn_arp_ui_poll_result inject_live_arp(void *opaque, char *error_buff
     if (read(context->trigger_fd, &trigger, sizeof(trigger)) != (ssize_t)sizeof(trigger)) {
         return SN_ARP_UI_POLL_IDLE;
     }
-    make_arp(frame, 1U, 9U, 30U);
+    if (trigger == '2') {
+        sn_arp_capture_session_stats(context->session)->analysis->config
+            .talkative_requests_per_minute = 1U;
+        make_arp(frame, 1U, 20U, 30U);
+    } else {
+        make_arp(frame, 1U, 9U, 30U);
+        if (trigger == '3') {
+            frame[27] = 0x55U;
+        }
+    }
     packet.data = frame;
     packet.captured_length = sizeof(frame);
     packet.wire_length = sizeof(frame);
@@ -142,8 +151,13 @@ static enum sn_arp_ui_poll_result inject_live_arp(void *opaque, char *error_buff
                                         error_buffer, error_capacity)) {
         return SN_ARP_UI_POLL_FAILED;
     }
-    context->totals->arp_packets = 1U;
-    context->totals->decoded = 1U;
+    {
+        const struct sn_arp_replay_stats *stats =
+            sn_arp_capture_session_stats(context->session);
+
+        context->totals->arp_packets = stats->state.captured;
+        context->totals->decoded = stats->state.decoded;
+    }
     return SN_ARP_UI_POLL_UPDATED;
 }
 
@@ -166,6 +180,7 @@ static void test_live_view_updates(void)
         struct sn_arp_capture_session *session;
         struct sn_arp_replay_stats *stats;
         struct sn_arp_view_totals totals = {.source = "test-interface"};
+        const uint8_t local_ipv4[4] = {192U, 168U, 1U, 9U};
         struct live_ui_test_context context;
         char error[256] = {0};
         int result;
@@ -175,6 +190,8 @@ static void test_live_view_updates(void)
         sn_arp_config_init(&config);
         config.rotation.packet_logging = false;
         config.rotation.address_logging = false;
+        memcpy(totals.local_ipv4, local_ipv4, sizeof(local_ipv4));
+        totals.local_ipv4_known = true;
         session = sn_arp_capture_session_open(&config, error, sizeof(error));
         assert(session != NULL);
         stats = sn_arp_capture_session_stats(session);
@@ -186,7 +203,7 @@ static void test_live_view_updates(void)
         result = sn_arp_ui_run_live(stats, &totals, inject_live_arp, &context,
                                     error, sizeof(error));
         assert(sn_arp_capture_session_finish(session, error, sizeof(error)));
-        assert(stats->state.decoded == 1U);
+        assert(stats->state.decoded == 3U);
         stats->analysis = NULL;
         sn_arp_capture_session_release(session);
         _exit(result);
@@ -196,11 +213,26 @@ static void test_live_view_updates(void)
     screen_after(master_fd, NULL, output, sizeof(output), &output_length);
     assert(strstr(output, "HOST") != NULL && strstr(output, "test-interface") != NULL);
     assert(strstr(output, "192.168.1.9") == NULL);
-    assert(write(trigger_pipe[1], "x", 1U) == 1);
-    screen_after(master_fd, NULL, output, sizeof(output), &output_length);
+    assert(write(trigger_pipe[1], "1", 1U) == 1);
+    screen_after_keys(master_fd, "", output, sizeof(output), &output_length);
     assert(strstr(output, "192.168.1.9") != NULL);
+    assert(strstr(output, "02:00:00:00:00:09") != NULL);
+    assert(strstr(output, "\033[32m") != NULL);
     screen_after(master_fd, "n", output, sizeof(output), &output_length);
     assert(strstr(output, "Packets: ARP 1") != NULL);
+    assert(write(trigger_pipe[1], "2", 1U) == 1);
+    screen_after_keys(master_fd, "", output, sizeof(output), &output_length);
+    assert(strstr(output, "talkative") != NULL && strstr(output, "192.168.1.20") != NULL);
+    assert(strstr(output, "\033[36m") != NULL);
+    assert(write(trigger_pipe[1], "3", 1U) == 1);
+    screen_after_keys(master_fd, "", output, sizeof(output), &output_length);
+    assert(strstr(output, "mac-change") != NULL);
+    assert(strstr(output, "02:00:00:00:00:55") != NULL);
+    if (strstr(output, "\033[38;5;131m") == NULL) {
+        (void)fprintf(stderr, "missing muted red SGR, captured %zu bytes:\n%s\n",
+                      output_length, output);
+    }
+    assert(strstr(output, "\033[38;5;131m") != NULL);
     send_keys(master_fd, "q");
     assert(waitpid(child, &status, 0) == child);
     assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);

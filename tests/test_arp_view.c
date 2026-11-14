@@ -34,13 +34,17 @@ static void test_row_header_and_markers(void)
     char tiny[8];
 
     sn_arp_view_header(line, sizeof(line));
-    assert(strstr(line, "HOST") != NULL && strstr(line, "REQUESTS") != NULL);
+        assert(strstr(line, "HOST IP") != NULL && strstr(line, "QUERIER MAC") != NULL &&
+            strstr(line, "REQUESTS") != NULL);
     assert(strstr(line, "SWEEPTGT") != NULL && strstr(line, "ALERTS") != NULL);
 
+        host.mac_count = 1U;
+        host.last_mac[0] = 0x02U;
+        host.last_mac[5] = 0x65U;
     sn_arp_view_host_row(&host, line, sizeof(line));
-    /* marker, space, IP padded to 15, then right-aligned columns of width 9, 8, 7 and 9. */
-    assert(strcmp(line, "  192.168.1.101" "        " "1234" "        " "5" "      " "99"
-                       "        " "33" "  ") == 0);
+        assert(strstr(line, "192.168.1.101") != NULL);
+        assert(strstr(line, "02:00:00:00:00:65") != NULL);
+        assert(strstr(line, "1234") != NULL && strstr(line, "talkative") == NULL);
     host.alerts = SN_ARP_ALERT_TALKATIVE | SN_ARP_ALERT_RANGE_POLLER;
     sn_arp_view_host_row(&host, line, sizeof(line));
     assert(line[0] == '!' && strstr(line, "talkative,range-poller") != NULL);

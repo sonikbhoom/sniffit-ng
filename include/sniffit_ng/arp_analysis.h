@@ -49,6 +49,7 @@ struct sn_arp_host {
     bool active;
     bool baseline;
     uint8_t ip[4];
+    uint8_t last_mac[6];
     uint8_t macs[SN_ARP_MAC_CAPACITY][6];
     size_t mac_count;
     uint64_t mac_changes;

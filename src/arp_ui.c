@@ -9,6 +9,8 @@
 
 #define COLOR_ALERT 1
 #define COLOR_BASELINE 2
+#define COLOR_LOCAL 3
+#define COLOR_SCANNER 4
 #define PANEL_MIN_TIMELINE_ROWS 3
 #define CTRL_L 12
 #define LIVE_INPUT_TIMEOUT_MS 50
@@ -51,9 +53,22 @@ static attr_t host_attributes(const struct view *view, const struct sn_arp_host 
 
     if (host->alerts != 0U) {
         if (view->colors) {
-            attributes = (attr_t)COLOR_PAIR(host->baseline ? COLOR_BASELINE : COLOR_ALERT);
+            unsigned int scanner_alerts = SN_ARP_ALERT_TALKATIVE |
+                                          SN_ARP_ALERT_RANGE_POLLER |
+                                          SN_ARP_ALERT_SWEEP;
+            int color = host->baseline ? COLOR_BASELINE : COLOR_ALERT;
+
+            if ((host->alerts & SN_ARP_ALERT_MAC_CHANGE) != 0U) {
+                color = COLOR_ALERT;
+            } else if ((host->alerts & scanner_alerts) != 0U) {
+                color = COLOR_SCANNER;
+            }
+            attributes = (attr_t)COLOR_PAIR(color);
         }
         attributes |= host->baseline ? A_DIM : A_BOLD;
+    } else if (view->colors && view->totals->local_ipv4_known &&
+               memcmp(host->ip, view->totals->local_ipv4, sizeof(host->ip)) == 0) {
+        attributes = (attr_t)COLOR_PAIR(COLOR_LOCAL);
     }
     return attributes;
 }
@@ -372,11 +387,14 @@ static int run_view(const struct sn_arp_analysis *analysis, const struct sn_arp_
     (void)keypad(stdscr, TRUE);
     (void)wtimeout(stdscr, poll_callback != NULL ? LIVE_INPUT_TIMEOUT_MS : -1);
     (void)curs_set(0);
-    if (has_colors()) {
-        (void)start_color();
+    if (has_colors() && start_color() != ERR) {
         (void)use_default_colors();
-        (void)init_pair(COLOR_ALERT, COLOR_RED, -1);
+        short alert_color = COLORS >= 256 ? 131 : COLOR_RED;
+
+        (void)init_pair(COLOR_ALERT, alert_color, -1);
         (void)init_pair(COLOR_BASELINE, COLOR_YELLOW, -1);
+        (void)init_pair(COLOR_LOCAL, COLOR_GREEN, -1);
+        (void)init_pair(COLOR_SCANNER, COLOR_CYAN, -1);
         view.colors = true;
     }
     for (;;) {

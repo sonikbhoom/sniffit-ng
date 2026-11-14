@@ -163,7 +163,9 @@ target_link_libraries(sniffit-ng PRIVATE
 )
 
 add_executable(arpwatch-ng-tui src/arp_main.c)
-target_link_libraries(arpwatch-ng-tui PRIVATE sniffit_arp_ui sniffit_privilege)
+target_link_libraries(arpwatch-ng-tui PRIVATE
+    sniffit_arp_ui sniffit_privilege sniffit_network_info
+)
 
 # Both applications are part of the default build; this target names them explicitly.
 add_custom_target(apps DEPENDS sniffit-ng arpwatch-ng-tui)

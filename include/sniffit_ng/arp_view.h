@@ -23,6 +23,8 @@ struct sn_arp_view_layout {
 
 struct sn_arp_view_totals {
     const char *source;
+    bool local_ipv4_known;
+    uint8_t local_ipv4[4];
     uint64_t arp_packets;
     uint64_t decoded;
     uint64_t truncated;

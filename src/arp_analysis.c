@@ -140,6 +140,7 @@ static void raise_alert(struct sn_arp_host *host, unsigned int flag, int64_t tim
 
 static void track_mac(struct sn_arp_host *host, const uint8_t mac[6], int64_t timestamp)
 {
+    memcpy(host->last_mac, mac, sizeof(host->last_mac));
     for (size_t index = 0U; index < host->mac_count; ++index) {
         if (memcmp(host->macs[index], mac, 6U) == 0) {
             return;

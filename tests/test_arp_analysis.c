@@ -256,6 +256,7 @@ static void test_mac_change_probes_and_replies(void)
     sn_arp_analysis_observe(analysis, &observation);
     assert((host_at(analysis, 20U)->alerts & SN_ARP_ALERT_MAC_CHANGE) != 0U);
     assert(host_at(analysis, 20U)->mac_count == 2U && host_at(analysis, 20U)->mac_changes == 1U);
+    assert(host_at(analysis, 20U)->last_mac[5] == 2U);
 
     /* Sender 0.0.0.0 is an address probe and never becomes a host. */
     observation = make(1U, 0U, 3U, target, 103);

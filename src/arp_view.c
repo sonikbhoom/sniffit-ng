@@ -43,14 +43,15 @@ static void format_mac(const uint8_t mac[6], char *output, size_t capacity)
 void sn_arp_view_header(char *output, size_t capacity)
 {
     if (output != NULL && capacity > 0U) {
-        (void)snprintf(output, capacity, "  %-15s %9s %8s %7s %9s  %s", "HOST", "REQUESTS",
-                       "REPLIES", "PEAK/M", "SWEEPTGT", "ALERTS");
+        (void)snprintf(output, capacity, "  %-15s %-17s %9s %8s %7s %9s  %s", "HOST IP",
+                       "QUERIER MAC", "REQUESTS", "REPLIES", "PEAK/M", "SWEEPTGT", "ALERTS");
     }
 }
 
 void sn_arp_view_host_row(const struct sn_arp_host *host, char *output, size_t capacity)
 {
     char address[16];
+    char mac[18] = "--";
     char alerts[64];
     char marker = ' ';
 
@@ -62,13 +63,17 @@ void sn_arp_view_host_row(const struct sn_arp_host *host, char *output, size_t c
         return;
     }
     format_ip(host->ip, address, sizeof(address));
+    if (host->mac_count > 0U) {
+        format_mac(host->last_mac, mac, sizeof(mac));
+    }
     (void)sn_arp_alerts_text(host->alerts, alerts, sizeof(alerts));
     if (host->alerts != 0U) {
         marker = host->baseline ? '~' : '!';
     }
-    (void)snprintf(output, capacity, "%c %-15s %9" PRIu64 " %8" PRIu64 " %7" PRIu64 " %9" PRIu64 "  %s",
-                   marker, address, host->requests, host->replies, host->peak_requests_per_minute,
-                   host->peak_sweep_targets, alerts);
+    (void)snprintf(output, capacity,
+                   "%c %-15s %-17s %9" PRIu64 " %8" PRIu64 " %7" PRIu64 " %9" PRIu64 "  %s",
+                   marker, address, mac, host->requests, host->replies,
+                   host->peak_requests_per_minute, host->peak_sweep_targets, alerts);
 }
 
 void sn_arp_view_observation(const struct sn_arp_observation *observation,

@@ -3,7 +3,9 @@
 #include "sniffit_ng/arp_replay.h"
 #include "sniffit_ng/capture.h"
 #include "sniffit_ng/privilege.h"
+#include "sniffit_ng/network_info.h"
 
+#include <arpa/inet.h>
 #include <inttypes.h>
 #include <signal.h>
 #include <stdio.h>
@@ -186,6 +188,15 @@ static int run_live_capture(const char *device, const struct sn_arp_config *conf
     if (use_tui) {
         struct sn_arp_view_totals totals = {.source = device};
         struct live_ui_context ui_context;
+        struct sn_network_info network_info;
+        uint8_t local_ipv4[4];
+
+        sn_network_info_init(&network_info, device);
+        if (sn_network_info_find_local_ipv4(&network_info) &&
+            inet_pton(AF_INET, network_info.local_ipv4, local_ipv4) == 1) {
+            memcpy(totals.local_ipv4, local_ipv4, sizeof(totals.local_ipv4));
+            totals.local_ipv4_known = true;
+        }
 
         session = sn_arp_capture_session_open(config, error, sizeof(error));
         if (session == NULL) {
