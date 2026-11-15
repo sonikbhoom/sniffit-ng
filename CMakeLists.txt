@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(sniffit_ng VERSION 0.1.2 LANGUAGES C)
+project(sniffit_ng VERSION 0.1.4 LANGUAGES C)
 
 include(GNUInstallDirs)
 
