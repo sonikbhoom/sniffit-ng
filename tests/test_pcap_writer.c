@@ -518,6 +518,32 @@ static void test_arp_capture_session_write_failure(void)
     assert(rmdir(directory) == 0);
 }
 
+static void test_arp_rotation_directory_errors(void)
+{
+    char missing_directory[4096];
+    char insecure_directory[4096];
+    char error[512] = {0};
+    struct sn_arp_rotation_config config;
+    struct sn_arp_rotation *rotation;
+
+    make_temporary_path(missing_directory, sizeof(missing_directory));
+    sn_arp_rotation_config_init(&config);
+    rotation = sn_arp_rotation_open(missing_directory, &config, error, sizeof(error));
+    assert(rotation == NULL);
+    assert(strstr(error, missing_directory) != NULL);
+    assert(strstr(error, "No such file or directory") != NULL);
+
+    assert(sn_test_temp_template(insecure_directory, sizeof(insecure_directory),
+                                 "sniffit-ng-arp-insecure"));
+    assert(mkdtemp(insecure_directory) != NULL && chmod(insecure_directory, 0755) == 0);
+    error[0] = '\0';
+    rotation = sn_arp_rotation_open(insecure_directory, &config, error, sizeof(error));
+    assert(rotation == NULL);
+    assert(strstr(error, insecure_directory) != NULL);
+    assert(strstr(error, "no group/other permissions") != NULL);
+    assert(chmod(insecure_directory, 0700) == 0 && rmdir(insecure_directory) == 0);
+}
+
 static void test_arp_config(void)
 {
     char path[4096];
@@ -565,6 +591,7 @@ int main(void)
     test_arp_idle_and_shared_limit();
     test_arp_log_write_failure();
     test_arp_capture_session_write_failure();
+    test_arp_rotation_directory_errors();
     test_arp_config();
     puts("pcap writer tests passed");
     return 0;

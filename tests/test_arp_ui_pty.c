@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -243,6 +244,9 @@ int main(void)
 {
     char pcap_path[4096];
     char config_path[4096];
+    char home_path[4096];
+    char xdg_config_directory[4096];
+    char config_directory[4096];
     uint8_t frame[42];
     pcap_t *dead = pcap_open_dead(DLT_EN10MB, 256);
     pcap_dumper_t *dumper;
@@ -254,13 +258,19 @@ int main(void)
     int status;
     pid_t child;
     int pcap_fd;
-    int config_fd;
 
     assert(sn_test_temp_template(pcap_path, sizeof(pcap_path), "a"));
-    assert(sn_test_temp_template(config_path, sizeof(config_path), "b"));
+    assert(sn_test_temp_template(home_path, sizeof(home_path), "arpwatch-home"));
+    assert(mkdtemp(home_path) != NULL);
+    assert(snprintf(xdg_config_directory, sizeof(xdg_config_directory), "%s/.config",
+                    home_path) > 0);
+    assert(mkdir(xdg_config_directory, 0700) == 0);
+    assert(snprintf(config_directory, sizeof(config_directory), "%s/arpwatch-ng",
+                    xdg_config_directory) > 0);
+    assert(mkdir(config_directory, 0700) == 0);
+    assert(snprintf(config_path, sizeof(config_path), "%s/config", config_directory) > 0);
     pcap_fd = mkstemp(pcap_path);
-    config_fd = mkstemp(config_path);
-    assert(pcap_fd >= 0 && close(pcap_fd) == 0 && config_fd >= 0 && close(config_fd) == 0);
+    assert(pcap_fd >= 0 && close(pcap_fd) == 0);
     assert(dead != NULL);
     dumper = pcap_dump_open(dead, pcap_path);
     assert(dumper != NULL);
@@ -290,8 +300,9 @@ int main(void)
     assert(child >= 0);
     if (child == 0) {
         (void)setenv("TERM", "xterm-256color", 1);
-        execl(ARP_CLI_PATH, ARP_CLI_PATH, "--read-pcap", pcap_path, "--config", config_path,
-              (char *)NULL);
+        (void)setenv("HOME", home_path, 1);
+        (void)unsetenv("XDG_CONFIG_HOME");
+        execl(ARP_CLI_PATH, ARP_CLI_PATH, "--read-pcap", pcap_path, (char *)NULL);
         _exit(127);
     }
 
@@ -367,6 +378,8 @@ int main(void)
     assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
     assert(close(master_fd) == 0);
     assert(unlink(pcap_path) == 0 && unlink(config_path) == 0);
+    assert(rmdir(config_directory) == 0 && rmdir(xdg_config_directory) == 0 &&
+           rmdir(home_path) == 0);
     test_live_view_updates();
     puts("arp ui pty tests passed");
     return 0;
