@@ -394,6 +394,9 @@ static void test_analysis_config(void)
     write_config(template, "packet_logging = false\naddress_logging = false\nlocal_network =\n");
     assert(sn_arp_config_load(template, &config, error, sizeof(error)) && !config.analysis.local_known);
     assert(unlink(template) == 0);
+    assert(!sn_arp_config_load(template, &config, error, sizeof(error)));
+    assert(strstr(error, "cannot open configuration file") != NULL);
+    assert(strstr(error, template) != NULL);
 }
 
 int main(void)

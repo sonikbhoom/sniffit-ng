@@ -9,15 +9,44 @@
 #include <inttypes.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 #include "sniffit_ng/arp_ui.h"
 
-#define USAGE "Usage: arpwatch-ng-tui (--read-pcap FILE | --interface DEVICE) --config FILE [--hosts | --tui]"
+#define USAGE "Usage: arpwatch-ng-tui (--read-pcap FILE | --interface DEVICE) [--config FILE] [--hosts | --tui]\n" \
+              "Default config: $XDG_CONFIG_HOME/arpwatch-ng/config or ~/.config/arpwatch-ng/config"
 #define LIVE_CAPTURE_BATCH_CAPACITY 64U
+#define DEFAULT_CONFIG_PATH_CAPACITY 4096U
 
 static volatile sig_atomic_t stop_requested;
+
+static bool resolve_default_config_path(char *path, size_t capacity,
+                                        char *error, size_t error_capacity)
+{
+    const char *xdg_config_home = getenv("XDG_CONFIG_HOME");
+    const char *home = getenv("HOME");
+    const char *base;
+    const char *suffix;
+    bool use_xdg = xdg_config_home != NULL && xdg_config_home[0] == '/';
+    int written;
+
+    base = use_xdg ? xdg_config_home : home;
+    suffix = use_xdg ? "arpwatch-ng/config" : ".config/arpwatch-ng/config";
+    if (base == NULL || base[0] != '/') {
+        (void)snprintf(error, error_capacity,
+                       "cannot determine default config path; set HOME or XDG_CONFIG_HOME, or use --config FILE");
+        return false;
+    }
+    written = snprintf(path, capacity, "%s%s%s", base,
+                       base[strlen(base) - 1U] == '/' ? "" : "/", suffix);
+    if (written < 0 || (size_t)written >= capacity) {
+        (void)snprintf(error, error_capacity, "default config path is too long");
+        return false;
+    }
+    return true;
+}
 
 static void print_hosts(const struct sn_arp_analysis *analysis)
 {
@@ -133,7 +162,7 @@ static enum sn_arp_ui_poll_result poll_live_ui(void *opaque, char *error_buffer,
 static int run_live_capture(const char *device, const struct sn_arp_config *config,
                             bool show_hosts, bool use_tui)
 {
-    char error[256] = {0};
+    char error[1024] = {0};
     struct sn_capture *capture;
     struct sn_arp_replay_stats stats = {0};
     struct sn_capture_stats capture_stats = {0};
@@ -183,8 +212,6 @@ static int run_live_capture(const char *device, const struct sn_arp_config *conf
         sn_capture_close(capture);
         return 1;
     }
-    fprintf(stderr, "arpwatch-ng-tui: monitoring ARP on %s without promiscuous mode; "
-                    "press Ctrl-C to stop\n", device);
     if (use_tui) {
         struct sn_arp_view_totals totals = {.source = device};
         struct live_ui_context ui_context;
@@ -205,6 +232,8 @@ static int run_live_capture(const char *device, const struct sn_arp_config *conf
             sn_capture_close(capture);
             return 1;
         }
+        fprintf(stderr, "arpwatch-ng-tui: monitoring ARP on %s without promiscuous mode; "
+                "press Ctrl-C to stop\n", device);
         ui_context = (struct live_ui_context){
             .capture = capture,
             .session = session,
@@ -222,6 +251,8 @@ static int run_live_capture(const char *device, const struct sn_arp_config *conf
         sn_arp_capture_session_stats(session)->analysis = NULL;
         sn_arp_capture_session_release(session);
     } else {
+        fprintf(stderr, "arpwatch-ng-tui: monitoring ARP on %s without promiscuous mode; "
+                        "press Ctrl-C to stop\n", device);
         processed = sn_arp_capture_process(capture, config, &stats, &stop_requested,
                                            error, sizeof(error));
     }
@@ -261,11 +292,12 @@ int main(int argc, char **argv)
     const char *pcap_path = NULL;
     const char *interface_name = NULL;
     const char *config_path = NULL;
+    char default_config_path[DEFAULT_CONFIG_PATH_CAPACITY];
     bool show_hosts = false;
     bool use_tui = false;
     struct sn_arp_config config;
     struct sn_arp_replay_stats stats;
-    char error[256] = {0};
+    char error[DEFAULT_CONFIG_PATH_CAPACITY + 128U] = {0};
     bool replayed;
 
     for (int index = 1; index < argc; ++index) {
@@ -289,14 +321,21 @@ int main(int argc, char **argv)
             return 2;
         }
     }
-    if ((pcap_path == NULL) == (interface_name == NULL) || config_path == NULL ||
-        (show_hosts && use_tui)) {
+    if ((pcap_path == NULL) == (interface_name == NULL) || (show_hosts && use_tui)) {
         fputs(USAGE "\n", stderr);
         return 2;
     }
     if (use_tui && (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO))) {
         fputs("--tui needs an interactive terminal\n", stderr);
         return 2;
+    }
+    if (config_path == NULL) {
+        if (!resolve_default_config_path(default_config_path, sizeof(default_config_path),
+                                         error, sizeof(error))) {
+            fprintf(stderr, "ARP configuration failed: %s\n", error);
+            return 1;
+        }
+        config_path = default_config_path;
     }
     if (!sn_arp_config_load(config_path, &config, error, sizeof(error))) {
         fprintf(stderr, "ARP configuration failed: %s\n", error);

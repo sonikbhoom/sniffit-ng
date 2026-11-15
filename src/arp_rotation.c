@@ -83,17 +83,44 @@ struct sn_arp_rotation *sn_arp_rotation_open(const char *directory,
     }
     descriptor = open(directory, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
     if (descriptor < 0) {
-        copy_error(error_buffer, error_capacity, strerror(errno));
+        int open_error = errno;
+
+        if (error_buffer != NULL && error_capacity > 0U) {
+            (void)snprintf(error_buffer, error_capacity,
+                           "cannot open log directory '%s': %s", directory,
+                           strerror(open_error));
+        }
         return NULL;
     }
-    if (fstat(descriptor, &info) != 0 || !S_ISDIR(info.st_mode) ||
-        info.st_uid != geteuid() || (info.st_mode & (S_IRWXG | S_IRWXO)) != 0U) {
+    if (fstat(descriptor, &info) != 0) {
+        int stat_error = errno;
+
         close(descriptor);
-        copy_error(error_buffer, error_capacity, "log directory must be owner-only and owned by you");
+        if (error_buffer != NULL && error_capacity > 0U) {
+            (void)snprintf(error_buffer, error_capacity,
+                           "cannot inspect log directory '%s': %s", directory,
+                           strerror(stat_error));
+        }
+        return NULL;
+    }
+    if (!S_ISDIR(info.st_mode) || info.st_uid != geteuid() ||
+        (info.st_mode & (S_IRWXG | S_IRWXO)) != 0U) {
+        close(descriptor);
+        if (error_buffer != NULL && error_capacity > 0U) {
+            (void)snprintf(error_buffer, error_capacity,
+                           "log directory '%s' must be a directory owned by you with no group/other permissions",
+                           directory);
+        }
         return NULL;
     }
     if (flock(descriptor, LOCK_EX | LOCK_NB) != 0) {
-        copy_error(error_buffer, error_capacity, "log directory is already in use");
+        int lock_error = errno;
+
+        if (error_buffer != NULL && error_capacity > 0U) {
+            (void)snprintf(error_buffer, error_capacity,
+                           "log directory '%s' is already in use: %s", directory,
+                           strerror(lock_error));
+        }
         close(descriptor);
         return NULL;
     }

@@ -198,8 +198,19 @@ bool sn_arp_config_load(const char *path, struct sn_arp_config *config,
     size_t line_number = 0U;
     FILE *stream;
 
-    if (path == NULL || config == NULL || (stream = fopen(path, "r")) == NULL) {
-        set_error(error_buffer, error_capacity, "cannot open configuration", 0U);
+    if (path == NULL || config == NULL) {
+        set_error(error_buffer, error_capacity, "invalid configuration path or destination", 0U);
+        return false;
+    }
+    stream = fopen(path, "r");
+    if (stream == NULL) {
+        int open_error = errno;
+
+        if (error_buffer != NULL && error_capacity > 0U) {
+            (void)snprintf(error_buffer, error_capacity,
+                           "cannot open configuration file '%s': %s", path,
+                           strerror(open_error));
+        }
         return false;
     }
     sn_arp_config_init(config);
