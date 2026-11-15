@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "sniffit_ng/payload_log.h"
+#include "test_temp.h"
 
 #include <assert.h>
 #include <stdint.h>
@@ -75,15 +76,17 @@ static void make_payload_frame(uint8_t *frame, size_t capacity)
 
 static void test_log_is_exclusive_private_and_hex_encoded(void)
 {
-    char path_template[] = "/tmp/sniffit-ng-payload-XXXXXX";
+    char path_template[4096];
     char error[256] = {0};
     struct stat metadata;
     struct sn_capture_packet packet = {0};
     struct sn_payload_log *log;
     uint8_t frame[59];
     char content[512] = {0};
-    int descriptor = mkstemp(path_template);
+    int descriptor;
 
+    assert(sn_test_temp_template(path_template, sizeof(path_template), "sniffit-ng-payload"));
+    descriptor = mkstemp(path_template);
     assert(descriptor >= 0);
     close(descriptor);
     assert(unlink(path_template) == 0);

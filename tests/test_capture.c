@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "sniffit_ng/capture.h"
+#include "test_temp.h"
 
 #include <assert.h>
 #include <pcap/pcap.h>
@@ -18,15 +19,17 @@ static void write_be16(uint8_t *bytes, uint16_t value)
 
 static void create_test_pcap(char *path, size_t path_capacity, int link_type)
 {
-    char path_template[] = "/tmp/sniffit-ng-capture-XXXXXX";
+    char path_template[4096];
     uint8_t frame[16] = {0};
     size_t frame_length = link_type == DLT_LINUX_SLL ? 16U : 14U;
     size_t protocol_offset = link_type == DLT_LINUX_SLL ? 14U : 12U;
     struct pcap_pkthdr header = {0};
     pcap_t *dead_capture;
     pcap_dumper_t *dumper;
-    int fd = mkstemp(path_template);
+    int fd;
 
+    assert(sn_test_temp_template(path_template, sizeof(path_template), "sniffit-ng-capture"));
+    fd = mkstemp(path_template);
     assert(fd >= 0);
     assert(close(fd) == 0);
     assert(snprintf(path, path_capacity, "%s", path_template) > 0);
@@ -50,7 +53,7 @@ static void create_test_pcap(char *path, size_t path_capacity, int link_type)
 
 static void test_offline_packet_lifetime_and_eof(void)
 {
-    char path[64];
+    char path[4096];
     char error[256] = {0};
     struct sn_capture_packet packet;
     struct sn_capture *capture;
@@ -75,7 +78,7 @@ static void test_offline_packet_lifetime_and_eof(void)
 
 static void test_offline_sll_preserves_link_type(void)
 {
-    char path[64];
+    char path[4096];
     char error[256] = {0};
     struct sn_capture_packet packet;
     struct sn_capture *capture;
@@ -96,7 +99,7 @@ static void test_offline_sll_preserves_link_type(void)
 
 static void test_unsupported_link_type_is_rejected(void)
 {
-    char path[64];
+    char path[4096];
     char error[256] = {0};
 
     create_test_pcap(path, sizeof(path), DLT_RAW);

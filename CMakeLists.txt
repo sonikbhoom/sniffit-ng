@@ -113,6 +113,17 @@ target_include_directories(sniffit_pcap_writer PUBLIC include)
 target_link_libraries(sniffit_pcap_writer PUBLIC PkgConfig::PCAP)
 target_compile_definitions(sniffit_pcap_writer PRIVATE _DEFAULT_SOURCE)
 
+add_library(sniffit_arp STATIC
+    src/arp_state.c src/arp_log.c src/arp_rotation.c src/arp_config.c src/arp_replay.c src/arp_analysis.c
+    src/arp_view.c
+)
+target_include_directories(sniffit_arp PUBLIC include)
+target_link_libraries(sniffit_arp PUBLIC sniffit_decode sniffit_capture sniffit_pcap_writer)
+
+add_library(sniffit_arp_ui STATIC src/arp_ui.c)
+target_include_directories(sniffit_arp_ui PUBLIC include)
+target_link_libraries(sniffit_arp_ui PUBLIC sniffit_arp PkgConfig::NCURSESW)
+
 add_library(sniffit_monitor STATIC src/monitor.c)
 target_include_directories(sniffit_monitor PUBLIC include)
 target_link_libraries(sniffit_monitor PUBLIC sniffit_capture sniffit_flow)
@@ -151,18 +162,33 @@ target_link_libraries(sniffit-ng PRIVATE
     sniffit_network_info sniffit_config sniffit_inspect
 )
 
-install(TARGETS sniffit-ng
+add_executable(arpwatch-ng-tui src/arp_main.c)
+target_link_libraries(arpwatch-ng-tui PRIVATE
+    sniffit_arp_ui sniffit_privilege sniffit_network_info
+)
+
+# Both applications are part of the default build; this target names them explicitly.
+add_custom_target(apps DEPENDS sniffit-ng arpwatch-ng-tui)
+
+install(TARGETS sniffit-ng arpwatch-ng-tui
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 install(PROGRAMS scripts/sniffit-ng-scanmap.py
     DESTINATION ${CMAKE_INSTALL_BINDIR}
     RENAME sniffit-ng-scanmap
 )
-install(FILES README.md
+install(FILES README.md LICENSE
     DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/sniffit-ng
+)
+install(FILES LICENSE
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/sniffit-ng
+    RENAME copyright
 )
 install(FILES sniffit-ng.conf.example
     DESTINATION ${CMAKE_INSTALL_DATADIR}/sniffit-ng
+)
+install(FILES arpwatch-ng.conf.example
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/arpwatch-ng
 )
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
@@ -187,6 +213,12 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(sniffit_pcap_writer PRIVATE
         -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
     )
+    target_compile_options(sniffit_arp PRIVATE
+        -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+    )
+    target_compile_options(sniffit_arp_ui PRIVATE
+        -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+    )
     target_compile_options(sniffit_monitor PRIVATE
         -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
     )
@@ -209,6 +241,9 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
         -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
     )
     target_compile_options(sniffit-ng PRIVATE
+        -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+    )
+    target_compile_options(arpwatch-ng-tui PRIVATE
         -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
     )
 endif()
@@ -253,7 +288,7 @@ if(BUILD_TESTING)
     add_test(NAME capture_offline COMMAND test_capture)
 
     add_executable(test_pcap_writer tests/test_pcap_writer.c)
-    target_link_libraries(test_pcap_writer PRIVATE sniffit_pcap_writer sniffit_capture)
+    target_link_libraries(test_pcap_writer PRIVATE sniffit_pcap_writer sniffit_capture sniffit_arp)
     target_compile_definitions(test_pcap_writer PRIVATE _DEFAULT_SOURCE)
     if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_options(test_pcap_writer PRIVATE
@@ -264,15 +299,69 @@ if(BUILD_TESTING)
 
     add_executable(test_capture_pipeline tests/test_capture_pipeline.c)
     target_link_libraries(test_capture_pipeline PRIVATE
-        sniffit_monitor sniffit_inspect PkgConfig::PCAP
+        sniffit_monitor sniffit_inspect sniffit_arp PkgConfig::PCAP
     )
     target_compile_definitions(test_capture_pipeline PRIVATE _DEFAULT_SOURCE)
+    target_compile_definitions(test_capture_pipeline PRIVATE
+        ARP_CLI_PATH="$<TARGET_FILE:arpwatch-ng-tui>"
+    )
+    add_dependencies(test_capture_pipeline arpwatch-ng-tui)
     if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_options(test_capture_pipeline PRIVATE
             -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
         )
     endif()
     add_test(NAME capture_pipeline COMMAND test_capture_pipeline)
+    add_test(NAME arp_cli_help COMMAND arpwatch-ng-tui --help)
+    add_test(NAME arp_cli_live_tui_requires_terminal
+        COMMAND arpwatch-ng-tui --interface lo --config /dev/null --tui)
+    set_tests_properties(arp_cli_live_tui_requires_terminal PROPERTIES WILL_FAIL TRUE)
+
+    add_executable(test_arp_analysis tests/test_arp_analysis.c)
+    target_link_libraries(test_arp_analysis PRIVATE sniffit_arp)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(test_arp_analysis PRIVATE
+            -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+        )
+    endif()
+    add_test(NAME arp_analysis COMMAND test_arp_analysis)
+
+    add_executable(test_arp_view tests/test_arp_view.c)
+    target_link_libraries(test_arp_view PRIVATE sniffit_arp)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(test_arp_view PRIVATE
+            -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+        )
+    endif()
+    add_test(NAME arp_view COMMAND test_arp_view)
+
+    add_executable(test_arp_capture_filter tests/test_arp_capture_filter.c)
+    target_link_libraries(test_arp_capture_filter PRIVATE sniffit_arp PkgConfig::PCAP)
+    target_compile_definitions(test_arp_capture_filter PRIVATE _DEFAULT_SOURCE)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(test_arp_capture_filter PRIVATE
+            -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+        )
+    endif()
+    add_test(NAME arp_capture_filter COMMAND test_arp_capture_filter)
+
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        find_library(ARP_UTIL_LIBRARY util)
+        add_executable(test_arp_ui_pty tests/test_arp_ui_pty.c)
+        target_link_libraries(test_arp_ui_pty PRIVATE sniffit_arp_ui ${ARP_UTIL_LIBRARY})
+        target_compile_definitions(test_arp_ui_pty PRIVATE
+            ARP_CLI_PATH="$<TARGET_FILE:arpwatch-ng-tui>"
+            _DEFAULT_SOURCE
+        )
+        add_dependencies(test_arp_ui_pty arpwatch-ng-tui)
+        if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+            target_compile_options(test_arp_ui_pty PRIVATE
+                -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
+            )
+        endif()
+        add_test(NAME arp_ui_pty COMMAND test_arp_ui_pty)
+        set_tests_properties(arp_ui_pty PROPERTIES TIMEOUT 30)
+    endif()
 
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_executable(test_capture_live tests/test_capture_live.c)
@@ -406,7 +495,7 @@ if(BUILD_TESTING AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND SNIFFIT_NG_ENABLE_SANITIZERS)
-    foreach(target sniffit_packet sniffit_decoder_modes sniffit_decode sniffit_flow sniffit_capture sniffit_pcap_writer sniffit_monitor sniffit_payload_log sniffit_priority_log sniffit_privilege sniffit_network_info sniffit_config sniffit_ui sniffit-ng test_priority_log test_ui_window test_ui_pty test_config test_network_info test_icmp_payload_view test_pcap_writer)
+    foreach(target sniffit_packet sniffit_decoder_modes sniffit_decode sniffit_flow sniffit_capture sniffit_pcap_writer sniffit_arp sniffit_arp_ui sniffit_monitor sniffit_payload_log sniffit_priority_log sniffit_privilege sniffit_network_info sniffit_config sniffit_ui sniffit-ng arpwatch-ng-tui test_priority_log test_ui_window test_ui_pty test_config test_network_info test_icmp_payload_view test_pcap_writer test_arp_capture_filter test_arp_ui_pty)
         target_compile_options(${target} PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
         target_link_options(${target} PUBLIC -fsanitize=address,undefined)
     endforeach()
@@ -416,7 +505,9 @@ set(CPACK_PACKAGE_NAME "sniffit-ng")
 set(CPACK_PACKAGE_VENDOR "Sniffit NG contributors")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Defensive network protocol monitor")
 set(CPACK_PACKAGE_DESCRIPTION
-    "Sniffit NG is a privilege-reduced network monitor with bounded Ethernet/SLL IPv4 parsing and a curses flow viewer.")
+    "Sniffit NG is a privilege-reduced network monitor with bounded Ethernet/SLL IPv4 parsing and a curses flow viewer. The package also provides arpwatch-ng-tui, an ARP replay and live monitoring tool with logging.")
+set(CPACK_PACKAGE_LICENSE "Apache-2.0")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
 set(CPACK_PACKAGE_CONTACT "Sniffit NG maintainers")
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/sonikbhoom/sniffit-ng")
@@ -427,7 +518,7 @@ set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(CPACK_GENERATOR "RPM;DEB")
     set(CPACK_RPM_PACKAGE_RELEASE "1")
-    set(CPACK_RPM_PACKAGE_LICENSE "NOASSERTION")
+    set(CPACK_RPM_PACKAGE_LICENSE "Apache-2.0")
     set(CPACK_RPM_PACKAGE_AUTOREQPROV ON)
     set(CPACK_RPM_PACKAGE_REQUIRES "python3")
     set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Sniffit NG maintainers")

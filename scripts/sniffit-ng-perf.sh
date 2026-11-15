@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Samples every sniffit-ng process and host load/memory into a CSV; meant to run once per cron tick.
+# Samples every sniffit-ng and arpwatch-ng-tui process plus host load/memory into a CSV; meant to run once per cron tick.
 #
 #   sniffit-ng-perf.sh [sample]   append one row per running instance (default)
 #   sniffit-ng-perf.sh summary    min/avg/max per interface over the current log
@@ -8,7 +8,7 @@
 #   */5 * * * * root SNIFFIT_NG_PERF_DIR=/var/log/sniffit-ng-perf /usr/local/sbin/sniffit-ng-perf.sh >/dev/null 2>&1
 #
 # Environment:
-#   SNIFFIT_NG_PID        space/comma-separated PIDs to monitor instead of finding "sniffit-ng" by name
+#   SNIFFIT_NG_PID        space/comma-separated PIDs to monitor instead of finding either app by name
 #   SNIFFIT_NG_PERF_DIR   log/state directory (default ${XDG_STATE_HOME:-~/.local/state}/sniffit-ng-perf)
 #   SNIFFIT_NG_PERF_MAX_BYTES  rotate the CSV past this size (default 10485760)
 #   SNIFFIT_NG_PERF_KEEP  rotated files to keep (default 5)
@@ -77,7 +77,9 @@ find_pids() {
         done
         return 0
     fi
-    pgrep -x sniffit-ng 2>/dev/null
+    pgrep -x sniffit-ng 2>/dev/null || true
+    pgrep -x arpwatch-ng-tui 2>/dev/null || true
+    return 0
 }
 
 iface_of() {

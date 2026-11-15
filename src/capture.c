@@ -116,6 +116,33 @@ struct sn_capture *sn_capture_open_live(
     return wrap_handle(handle, true, error_buffer, error_buffer_size);
 }
 
+bool sn_capture_set_filter(struct sn_capture *capture,
+                           const char *expression,
+                           char *error_buffer,
+                           size_t error_buffer_size)
+{
+    struct bpf_program program = {0};
+
+    if (capture == NULL || capture->handle == NULL || expression == NULL ||
+        expression[0] == '\0') {
+        copy_error(error_buffer, error_buffer_size, "invalid capture filter arguments");
+        return false;
+    }
+    if (pcap_compile(capture->handle, &program, expression, 1,
+                     PCAP_NETMASK_UNKNOWN) != 0) {
+        copy_error(error_buffer, error_buffer_size, pcap_geterr(capture->handle));
+        return false;
+    }
+    if (pcap_setfilter(capture->handle, &program) != 0) {
+        copy_error(error_buffer, error_buffer_size, pcap_geterr(capture->handle));
+        pcap_freecode(&program);
+        return false;
+    }
+    pcap_freecode(&program);
+    copy_error(error_buffer, error_buffer_size, "");
+    return true;
+}
+
 bool sn_capture_set_nonblocking(
     struct sn_capture *capture,
     char *error_buffer,
@@ -132,6 +159,31 @@ bool sn_capture_set_nonblocking(
         copy_error(error_buffer, error_buffer_size, pcap_error);
         return false;
     }
+    copy_error(error_buffer, error_buffer_size, "");
+    return true;
+}
+
+bool sn_capture_get_stats(struct sn_capture *capture,
+                          struct sn_capture_stats *stats,
+                          char *error_buffer,
+                          size_t error_buffer_size)
+{
+    struct pcap_stat native_stats = {0};
+
+    if (capture == NULL || capture->handle == NULL || !capture->live || stats == NULL) {
+        copy_error(error_buffer, error_buffer_size,
+                   "capture statistics are only available for live sources");
+        return false;
+    }
+    if (pcap_stats(capture->handle, &native_stats) != 0) {
+        copy_error(error_buffer, error_buffer_size, pcap_geterr(capture->handle));
+        return false;
+    }
+    *stats = (struct sn_capture_stats){
+        .received = native_stats.ps_recv,
+        .dropped = native_stats.ps_drop,
+        .interface_dropped = native_stats.ps_ifdrop
+    };
     copy_error(error_buffer, error_buffer_size, "");
     return true;
 }
