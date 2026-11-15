@@ -177,8 +177,12 @@ install(PROGRAMS scripts/sniffit-ng-scanmap.py
     DESTINATION ${CMAKE_INSTALL_BINDIR}
     RENAME sniffit-ng-scanmap
 )
-install(FILES README.md
+install(FILES README.md LICENSE
     DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/sniffit-ng
+)
+install(FILES LICENSE
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/sniffit-ng
+    RENAME copyright
 )
 install(FILES sniffit-ng.conf.example
     DESTINATION ${CMAKE_INSTALL_DATADIR}/sniffit-ng
@@ -502,6 +506,8 @@ set(CPACK_PACKAGE_VENDOR "Sniffit NG contributors")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Defensive network protocol monitor")
 set(CPACK_PACKAGE_DESCRIPTION
     "Sniffit NG is a privilege-reduced network monitor with bounded Ethernet/SLL IPv4 parsing and a curses flow viewer. The package also provides arpwatch-ng-tui, an ARP replay and live monitoring tool with logging.")
+set(CPACK_PACKAGE_LICENSE "Apache-2.0")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
 set(CPACK_PACKAGE_CONTACT "Sniffit NG maintainers")
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/sonikbhoom/sniffit-ng")
@@ -512,7 +518,7 @@ set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(CPACK_GENERATOR "RPM;DEB")
     set(CPACK_RPM_PACKAGE_RELEASE "1")
-    set(CPACK_RPM_PACKAGE_LICENSE "NOASSERTION")
+    set(CPACK_RPM_PACKAGE_LICENSE "Apache-2.0")
     set(CPACK_RPM_PACKAGE_AUTOREQPROV ON)
     set(CPACK_RPM_PACKAGE_REQUIRES "python3")
     set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Sniffit NG maintainers")

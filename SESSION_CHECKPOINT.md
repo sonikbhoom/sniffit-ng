@@ -122,4 +122,4 @@ Items 1-8 in the earlier Next Work list remain open, plus the new `PLAN.md` inte
 4. Still unverified: high-traffic, real disk-full and multi-day behavior of the rotating logs; live ARP capture.
 
 ### Recovery
-- Private chat snapshots and the capture live outside the repository (a snapshot directory under `~/src` and a capture directory under `$HOME`); never stage or publish them.
+- Private chat snapshots and the capture live outside the repository (under `~/sniffit-private/`); never stage or publish them.

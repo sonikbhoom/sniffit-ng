@@ -1,5 +1,7 @@
 # Use an existing owner-only directory; do not share it with other applications.
 log_directory = /absolute/path/to/private-arpwatch-logs
+# Open the interactive viewer by default (command-line --tui can also enable it).
+tui = true
 packet_logging = true
 address_logging = true
 packet_segment_bytes = 67108864

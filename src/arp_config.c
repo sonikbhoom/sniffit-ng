@@ -25,6 +25,7 @@ struct setting {
 
 static const struct setting settings[] = {
     {"log_directory", SETTING_DIRECTORY, offsetof(struct sn_arp_config, log_directory)},
+    {"tui", SETTING_BOOL, offsetof(struct sn_arp_config, tui)},
     {"packet_logging", SETTING_BOOL, ROTATION_OFFSET(packet_logging)},
     {"address_logging", SETTING_BOOL, ROTATION_OFFSET(address_logging)},
     {"packet_segment_bytes", SETTING_NUMBER, ROTATION_OFFSET(packet_segment_bytes)},

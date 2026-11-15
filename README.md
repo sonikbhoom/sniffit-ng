@@ -40,7 +40,7 @@ These are summaries, not complete protocol decoders. IPv6 is not yet supported. 
 
 ### ARP replay and live capture
 
-On the `arpwatch-ng-tui` branch, `arpwatch-ng-tui --read-pcap FILE --config FILE` replays captures, while `arpwatch-ng-tui --interface DEVICE --config FILE` monitors live ARP until `q`, Ctrl-C or SIGTERM. Add `--tui` for the interactive viewer, or `--hosts` to print the accumulated host table at stop; those options cannot be combined. Both executables are built, installed and packaged together: the default build produces both, `cmake --build build --target apps` names them explicitly, and the RPM/DEB install both along with `share/arpwatch-ng/arpwatch-ng.conf.example`. Use that file as the configuration template. The configured absolute `log_directory` must already exist, be owned by the current user, and have no group or other permissions. Use a dedicated directory; segment names and their `.owner` markers are reserved for this tool.
+On the `arpwatch-ng-tui` branch, `arpwatch-ng-tui --read-pcap FILE --config FILE` replays captures, while `arpwatch-ng-tui --interface DEVICE --config FILE` monitors live ARP until `q`, Ctrl-C or SIGTERM. Set `tui = true` in the config or add `--tui` for the interactive viewer; `--hosts` prints the accumulated host table at stop and cannot be combined with the TUI. Both executables are built, installed and packaged together: the default build produces both, `cmake --build build --target apps` names them explicitly, and the RPM/DEB install both along with `share/arpwatch-ng/arpwatch-ng.conf.example`. Use that file as the configuration template. The configured absolute `log_directory` must already exist, be owned by the current user, and have no group or other permissions. Use a dedicated directory; segment names and their `.owner` markers are reserved for this tool.
 
 Live mode requires `CAP_NET_RAW`. It opens the selected interface and installs its capture filter before dropping capture privileges; packet processing and log creation then run as the invoking user. Capture is non-promiscuous and sees only frames delivered to that interface, not arbitrary switched traffic. The filter handles untagged Ethernet and Linux cooked v1 ARP plus up to two VLAN tags; unsupported or unclassified link frames are not archived as ARP. On stop, libpcap received/drop/interface-drop counters are shown when the platform provides them. Capture and log failures are reported and stop processing.
 
@@ -58,7 +58,7 @@ Select a connection and press Enter to see details. Use arrow keys or `j`/`k` to
 
 Flow details label `SYN ONLY / NO PAYLOAD` while every observed packet in a TCP flow is a header-only SYN. The marker clears as soon as a non-SYN packet or payload is observed. It describes only packets seen by this capture so far; it does not prove that a connection was rejected or establish remote identity.
 
-This repository currently has no license. Public visibility does not itself grant permission to reuse, modify, or redistribute the code.
+This repository is licensed under the Apache License 2.0; see [LICENSE](LICENSE). Copyright 2026 Sonik Bhoom. This license applies to this successor repository only; it does not relicense the separate `sniffit-legacy` tree or third-party components. It does not grant authorization to monitor any system or network.
 
 ## Build and test
 
@@ -117,7 +117,7 @@ cmake -S . -B build/release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
 cmake --build build/release --target package
 ```
 
-Packages are written to `build/release/packages/`. Runtime dependencies are declared/discovered by CPack; generated packages do not set file capabilities. Configure capture privilege separately after installation, and never assign `CAP_NET_RAW` to a developer-writable executable. This source tree currently has no license, so package creation does not grant redistribution rights; resolve licensing before publishing packages for general use.
+Packages are written to `build/release/packages/` and include the Apache-2.0 license text. Runtime dependencies are declared/discovered by CPack; generated packages do not set file capabilities. Configure capture privilege separately after installation, and never assign `CAP_NET_RAW` to a developer-writable executable. Review the license and package dependencies before redistribution.
 
 ## Privacy and Ethical Use
 

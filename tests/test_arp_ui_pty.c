@@ -280,7 +280,8 @@ int main(void)
     pcap_dump_close(dumper);
     pcap_close(dead);
     write_text(config_path,
-               "packet_logging = false\naddress_logging = false\nlocal_network = 192.168.1.0/24\n");
+               "packet_logging = false\naddress_logging = false\n"
+               "local_network = 192.168.1.0/24\ntui = true\n");
     for (int page = 0; page < 20; ++page) {
         strcat(pages, KEY_PGDN);
     }
@@ -290,7 +291,7 @@ int main(void)
     if (child == 0) {
         (void)setenv("TERM", "xterm-256color", 1);
         execl(ARP_CLI_PATH, ARP_CLI_PATH, "--read-pcap", pcap_path, "--config", config_path,
-              "--tui", (char *)NULL);
+              (char *)NULL);
         _exit(127);
     }
 

@@ -8,6 +8,7 @@
 
 struct sn_arp_config {
     char log_directory[SN_ARP_LOG_DIRECTORY_CAPACITY];
+    bool tui;
     struct sn_arp_rotation_config rotation;
     struct sn_arp_analysis_config analysis;
 };

@@ -350,6 +350,7 @@ static void test_analysis_config(void)
     assert(descriptor >= 0 && close(descriptor) == 0);
     write_config(template, "packet_logging = false\naddress_logging = false\n");
     assert(sn_arp_config_load(template, &config, error, sizeof(error)));
+    assert(!config.tui);
     assert(!config.analysis.local_known && config.analysis.sweep_targets == 100U);
     assert(config.analysis.talkative_requests_per_minute == 60U);
 
@@ -357,10 +358,12 @@ static void test_analysis_config(void)
                  "packet_logging = false\naddress_logging = false\n"
                  "local_network = 192.168.1.0/24\n"
                  "baseline_ips = 192.168.1.101, 192.168.1.102\n"
+                 "tui = true\n"
                  "talkative_requests_per_minute = 90\nsweep_targets = 128\n"
                  "sweep_window_seconds = 30\nrange_poll_repeat = 500\n"
                  "range_poll_min_targets = 4\noff_link_min_requests = 5\n");
     assert(sn_arp_config_load(template, &config, error, sizeof(error)));
+    assert(config.tui);
     assert(config.analysis.local_known && config.analysis.local_prefix == 24U);
     assert(config.analysis.local_network[2] == 1U && config.analysis.baseline_count == 2U);
     assert(config.analysis.baseline_ips[1][3] == 102U);
@@ -373,6 +376,7 @@ static void test_analysis_config(void)
         "local_network = 192.168.1.0\n", "local_network = 192.168.1.0/33\n",
         "local_network = 300.1.1.0/24\n", "local_network = /24\n",
         "baseline_ips = 192.168.1.1,nope\n", "baseline_ips = 192.168.1.1,\n",
+        "tui = on\n",
         "sweep_targets = 513\n", "sweep_targets = 10\nsweep_window_seconds = 0\n",
         "talkative_requests_per_minute = -1\n", "sweep_targets = 5\nsweep_targets = 6\n",
         ("baseline_ips = 1.1.1.1,1.1.1.2,1.1.1.3,1.1.1.4,1.1.1.5,1.1.1.6,1.1.1.7,1.1.1.8,"

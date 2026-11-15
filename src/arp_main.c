@@ -302,6 +302,15 @@ int main(int argc, char **argv)
         fprintf(stderr, "ARP configuration failed: %s\n", error);
         return 1;
     }
+    use_tui = use_tui || config.tui;
+    if (show_hosts && use_tui) {
+        fputs(USAGE "\n", stderr);
+        return 2;
+    }
+    if (use_tui && (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO))) {
+        fputs("--tui needs an interactive terminal\n", stderr);
+        return 2;
+    }
     if (interface_name != NULL) {
         return run_live_capture(interface_name, &config, show_hosts, use_tui);
     }

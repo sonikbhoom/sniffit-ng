@@ -3,6 +3,7 @@
 #include "sniffit_ng/capture.h"
 #include "sniffit_ng/arp_log.h"
 #include "sniffit_ng/arp_config.h"
+#include "sniffit_ng/arp_replay.h"
 #include "sniffit_ng/arp_rotation.h"
 #include "sniffit_ng/pcap_writer.h"
 #include "test_temp.h"
@@ -455,6 +456,68 @@ static void test_arp_log_write_failure(void)
     assert(unlink(path) == 0);
 }
 
+static void test_arp_capture_session_write_failure(void)
+{
+    char directory[4096];
+    char path[4096];
+    pid_t child;
+    int status;
+
+    assert(sn_test_temp_template(directory, sizeof(directory), "sniffit-ng-arp-session-full"));
+    assert(mkdtemp(directory) != NULL);
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        struct rlimit limit = {.rlim_cur = 64, .rlim_max = 64};
+        struct sn_arp_config config;
+        struct sn_arp_capture_session *session;
+        struct sn_capture_packet packet = {
+            .data = (const uint8_t[]){
+                [12] = 0x08U, [13] = 0x06U, [15] = 1U, [16] = 0x08U,
+                [18] = 6U, [19] = 4U, [21] = 1U, [22] = 0x02U,
+                [27] = 1U, [28] = 192U, [31] = 1U, [38] = 192U, [41] = 2U
+            },
+            .captured_length = 42U,
+            .wire_length = 42U,
+            .link_type = SN_PACKET_LINK_ETHERNET,
+            .timestamp = {.tv_sec = 100U}
+        };
+        char error[256] = {0};
+        time_t now = time(NULL);
+
+        assert(signal(SIGXFSZ, SIG_IGN) != SIG_ERR);
+        assert(setrlimit(RLIMIT_FSIZE, &limit) == 0);
+        sn_arp_config_init(&config);
+        config.rotation.address_logging = false;
+        assert(snprintf(config.log_directory, sizeof(config.log_directory), "%s", directory) > 0);
+        session = sn_arp_capture_session_open(&config, error, sizeof(error));
+        assert(session != NULL);
+        assert(now != (time_t)-1);
+        assert(!sn_arp_capture_session_process(session, &packet, now, error, sizeof(error)));
+        assert(error[0] != '\0');
+        assert(!sn_arp_capture_session_finish(session, error, sizeof(error)));
+        sn_arp_capture_session_release(session);
+        _exit(0);
+    }
+    assert(waitpid(child, &status, 0) == child);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    {
+        DIR *stream = opendir(directory);
+        struct dirent *entry;
+
+        assert(stream != NULL);
+        while ((entry = readdir(stream)) != NULL) {
+            if (entry->d_name[0] == '.') {
+                continue;
+            }
+            assert(snprintf(path, sizeof(path), "%s/%s", directory, entry->d_name) > 0);
+            assert(unlink(path) == 0);
+        }
+        assert(closedir(stream) == 0);
+    }
+    assert(rmdir(directory) == 0);
+}
+
 static void test_arp_config(void)
 {
     char path[4096];
@@ -501,6 +564,7 @@ int main(void)
     test_arp_marker_collision();
     test_arp_idle_and_shared_limit();
     test_arp_log_write_failure();
+    test_arp_capture_session_write_failure();
     test_arp_config();
     puts("pcap writer tests passed");
     return 0;
