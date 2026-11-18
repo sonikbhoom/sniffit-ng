@@ -35,6 +35,10 @@ bool sn_decode_udp(const struct sn_packet_view *packet,
         return false;
     }
     application[0] = '\0';
+    if ((source_port == 1900U || destination_port == 1900U) && !packet->more_fragments &&
+        sn_decode_ssdp(packet->payload, packet->payload_length, output, output_capacity)) {
+        return true;
+    }
     if ((source_port == 67U || source_port == 68U ||
          destination_port == 67U || destination_port == 68U) &&
         sn_decode_dhcp4(packet->payload, packet->payload_length,
@@ -47,6 +51,16 @@ bool sn_decode_udp(const struct sn_packet_view *packet,
     if ((source_port == 53U || destination_port == 53U) &&
         sn_decode_dns(packet->payload, packet->payload_length,
                       output, output_capacity)) {
+        return true;
+    }
+    if ((source_port == 5353U || destination_port == 5353U) &&
+        sn_decode_mdns(packet->payload, packet->payload_length,
+                       output, output_capacity)) {
+        return true;
+    }
+    if ((source_port == 5353U || destination_port == 5353U) &&
+        sn_decode_mdns(packet->payload, packet->payload_length,
+                       output, output_capacity)) {
         return true;
     }
     if ((source_port == 161U || source_port == 162U ||

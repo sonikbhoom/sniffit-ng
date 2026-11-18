@@ -31,9 +31,12 @@ Use Sniffit NG only on systems and networks you own or have permission to monito
 
 - Live capture and saved pcap files on Ethernet and Linux cooked v1 (SLL) links.
 - IPv4 connections, packet counts, traffic rates, address and port filters, and packet error counts.
-- Short summaries for TCP, UDP, Telnet negotiation/control, HTTP/1.x, TLS records, DNS, DHCPv4/BOOTP, NTP, SNMP, Syslog, RADIUS, TACACS+, QUIC, RTP/RTCP, ICMP, IGMP, and VRRP.
+- Short summaries for TCP, UDP, Telnet negotiation/control, HTTP/1.x, TLS records, DNS and mDNS/DNS-SD, DHCPv4/BOOTP, NTP, SNMP, Syslog, RADIUS, TACACS+, QUIC, RTP/RTCP, ICMP, IGMP, VRRP, GRE outer headers, OSPFv2 headers, and complete packet-local BGP message headers.
+- mDNS on UDP/5353 is decoded by default into bounded question and resource-record summaries. TXT values are printable-sanitized and capped; regular DNS/53 TXT values remain hidden. Full mDNS packet hex requires `mdns_full_decode = true` and its separate sensitive-data acknowledgment. Native mDNS uses link-local multicast and does not cross subnets or VLANs without a reflector or proxy. Enterprise networks commonly restrict it; where permitted or reflected, service names and TXT metadata are visible. Capture only networks you are authorized to monitor.
+- Press `5` to filter by `tcp`, `udp`, `icmp`, `igmp`, `vrrp`, `bgp`, `dhcp4`, `gre`, `ospf2`, or `all`. BGP and DHCPv4 match their transport ports; selecting them does not require each packet to contain a complete protocol message.
 - A terminal view with connection details, basic source/destination filters, and configurable TCP/UDP priority ports.
 - UDP DNS traffic to port 53 is grouped into one session per IPv4 client/resolver pair, independent of the client's ephemeral port. The detail history retains the latest 32 decoded DNS messages in capture order and expires after five minutes without traffic.
+- UDP port 1900 is labeled SSDP as a service hint. Recognized UPnP discovery searches, announcements, and replies show the message type and discovery target (`ST` or `NT`) in flow details. The monitor does not send discovery requests or fetch advertised device URLs.
 - Per-flow detail-pane security advisories for recognized cleartext or unauthenticated services, kept separate from protocol summaries.
 
 These are summaries, not complete protocol decoders. IPv6 is not yet supported. TCP is not reassembled across packets, so a message split between packets may be missed. HTTPS contents are not decrypted. Sniffit limits how many connections and details it keeps in memory. Multi-day use still needs longer testing.
@@ -152,6 +155,17 @@ The config is read from `$XDG_CONFIG_HOME/sniffit-ng/config` or `~/.config/sniff
 full_decode = true
 ## User acknowledges Telnet hex display can expose credentials and private traffic.
 ```
+
+For UDP flows with either endpoint on port 5353, enable the independent raw hex view in the config:
+
+```ini
+mdns_full_decode = true
+## User acknowledges mDNS hex display can expose private device and service names.
+```
+
+Press Enter on the UDP flow to see the latest retained frame. The Telnet and mDNS views share the eight-frame in-memory limit and do not write packets to disk. The mDNS view selects by port, not by inspecting the payload, and does not retain fragmented UDP packets.
+
+The flow detail panel uses built-in service labels first, then the operating system's TCP/UDP services database (typically `/etc/services` on Linux). A local entry such as `my-device 45678/udp` labels an otherwise unmapped UDP port. These labels are port hints, not proof of what the packet contains.
 
 The UI marks the mode as active and labels source IPs as unauthenticated claims. Only packets accepted by the bounded IPv4/TCP parser are associated with flows; malformed or genuinely truncated packets are not retained for this view. Ethernet has no direction field; Linux cooked v1 provides its packet type and local-link source metadata. These fields clarify what this host captured but cannot cryptographically prove the remote origin. The in-memory history is capped at eight frames and each frame at 65,535 captured bytes; larger records show a storage-limit note.
 

@@ -8,6 +8,10 @@ full_decode = false
 # To enable, make this exact acknowledgment active as well.
 # ## User acknowledges Telnet hex display can expose credentials and private traffic.
 
+# Optional UDP/5353 packet hex in flow details; independent of TCP/23.
+mdns_full_decode = false
+# ## User acknowledges mDNS hex display can expose private device and service names.
+
 # External IP lookup is disabled unless explicitly enabled. If the selected
 # interface has an RFC 1918 IPv4 address, enabling this sends one HTTPS request
 # to ifconfig.io when live capture starts.

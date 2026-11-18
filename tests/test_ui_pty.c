@@ -30,6 +30,7 @@ static void seed_full_decode(struct sn_monitor *monitor)
     assert(sn_monitor_set_full_decode(monitor, true));
     record = &monitor->full_decode_records[0];
     record->active = true;
+    record->protocol = 6U;
     record->endpoints[0] = monitor->flows.entries[0].endpoints[0];
     record->endpoints[1] = monitor->flows.entries[0].endpoints[1];
     record->sequence = 1U;
@@ -77,6 +78,7 @@ static void seed_flows(struct sn_monitor *monitor)
 {
     struct sn_flow *first = &monitor->flows.entries[0];
     struct sn_flow *second = &monitor->flows.entries[1];
+    struct sn_flow *ssdp = &monitor->flows.entries[2];
 
     first->active = true;
     first->protocol = 6U;
@@ -111,6 +113,12 @@ static void seed_flows(struct sn_monitor *monitor)
     second->endpoints[1].ipv4[3] = 1U;
     second->endpoints[1].port = 53U;
     second->packets[0] = 1U;
+
+    ssdp->active = true;
+    ssdp->protocol = 17U;
+    ssdp->endpoints[0] = (struct sn_flow_endpoint){.ipv4 = {192U, 0U, 2U, 6U}, .port = 58494U};
+    ssdp->endpoints[1] = (struct sn_flow_endpoint){.ipv4 = {239U, 255U, 255U, 250U}, .port = 1900U};
+    ssdp->packets[0] = 3U;
 }
 
 struct ui_poll_context {
@@ -120,6 +128,37 @@ struct ui_poll_context {
     bool second_injected;
 };
 
+static void inject_mdns(struct sn_monitor *monitor)
+{
+    uint8_t frame[54U] = {0};
+    uint8_t *ip = frame + 14U;
+    uint8_t *udp = ip + 20U;
+    size_t before = sn_monitor_full_decode_count(monitor);
+    struct sn_capture_packet packet = {
+        .data = frame, .captured_length = sizeof(frame), .wire_length = sizeof(frame),
+        .timestamp = {.tv_sec = 1700000003}, .link_type = SN_PACKET_LINK_ETHERNET
+    };
+
+    write_be16(frame + 12U, 0x0800U);
+    ip[0] = 0x45U;
+    write_be16(ip + 2U, 40U);
+    ip[8] = 255U;
+    ip[9] = 17U;
+    memcpy(ip + 12U, (const uint8_t[]){192U, 0U, 2U, 190U, 224U, 0U, 0U, 251U}, 8U);
+    write_be16(udp, 5353U);
+    write_be16(udp + 2U, 5353U);
+    write_be16(udp + 4U, 20U);
+    udp[8] = 0xcaU;
+    udp[9] = 0xfeU;
+
+    assert(sn_monitor_process(monitor, &packet) == SN_MONITOR_PROCESSED);
+    assert(sn_monitor_full_decode_count(monitor) == before);
+    assert(sn_monitor_set_hex_views(monitor, false, true));
+    assert(sn_monitor_process(monitor, &packet) == SN_MONITOR_PROCESSED);
+    assert(sn_monitor_full_decode_count(monitor) == 1U);
+    assert(sn_monitor_full_decode_at(monitor, 0U)->protocol == 17U);
+}
+
 static enum sn_ui_poll_result inject_new_flow(void *opaque, const char **status)
 {
     struct ui_poll_context *context = opaque;
@@ -127,14 +166,20 @@ static enum sn_ui_poll_result inject_new_flow(void *opaque, const char **status)
     char trigger;
 
     (void)status;
+    if (context->second_injected) {
+        if (read(context->trigger_fd, &trigger, 1U) == 1 && trigger == 'm') {
+            inject_mdns(context->monitor);
+            return SN_UI_POLL_UPDATED;
+        }
+        return SN_UI_POLL_IDLE;
+    }
     if (context->injected) {
         uint8_t frame[54U] = {0};
         uint8_t *ip = frame + 14U;
         uint8_t *tcp = ip + 20U;
         struct sn_capture_packet packet = {0};
 
-        if (context->second_injected ||
-            read(context->trigger_fd, &trigger, 1U) != 1) {
+        if (read(context->trigger_fd, &trigger, 1U) != 1) {
             return SN_UI_POLL_IDLE;
         }
         context->second_injected = true;
@@ -461,12 +506,56 @@ int main(void)
     output_length = 0U;
     assert(write(master_fd, "5", 1U) == 1);
     assert(read_until(master_fd, output, sizeof(output), &output_length,
-                      "Protocol (tcp, udp, icmp, igmp, vrrp or all):", 1000));
+                      "Protocol (tcp udp icmp igmp vrrp bgp dhcp4 gre ospf2 all):", 1000));
     assert(write(master_fd, "icmp\n", sizeof("icmp\n") - 1U) ==
            (ssize_t)(sizeof("icmp\n") - 1U));
     protocol_filter_applied = read_until(master_fd, output, sizeof(output),
                                          &output_length, "Protocol: ICMP", 1000);
     assert(protocol_filter_applied);
+
+    output[0] = '\0';
+    output_length = 0U;
+    assert(write(master_fd, "5", 1U) == 1);
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "bgp dhcp4 gre ospf2 all", 1000));
+    assert(write(master_fd, "bgp\n", 4U) == 4);
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "Protocol: BGP", 1000));
+
+    output[0] = '\0';
+    output_length = 0U;
+    assert(write(master_fd, "5", 1U) == 1);
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "bgp dhcp4 gre ospf2 all", 1000));
+    assert(write(master_fd, "udp\n1", 5U) == 5);
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "host (IPv4 or all):", 1000));
+    assert(write(master_fd, "192.0.2.6\n", 10U) == 10);
+    output[0] = '\0';
+    output_length = 0U;
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "239.255.255.250:1900", 1000));
+    assert(write(master_fd, "\n", 1U) == 1);
+    assert(read_until(master_fd, output, sizeof(output), &output_length,
+                      "Services A/B: unknown / SSDP", 1000));
+    assert(write(master_fd, "q", 1U) == 1);
+
+            assert(write(trigger_pipe[1], "m", 1U) == 1);
+            output[0] = '\0';
+            output_length = 0U;
+            assert(write(master_fd, "1", 1U) == 1);
+            assert(read_until(master_fd, output, sizeof(output), &output_length,
+                     "host (IPv4 or all):", 1000));
+            assert(write(master_fd, "192.0.2.190\n", sizeof("192.0.2.190\n") - 1U) ==
+                (ssize_t)(sizeof("192.0.2.190\n") - 1U));
+            assert(read_until(master_fd, output, sizeof(output), &output_length,
+                     "224.0.0.251", 1000));
+            assert(write(master_fd, "\n", 1U) == 1);
+            assert(read_until(master_fd, output, sizeof(output), &output_length,
+                     "Services A/B: mDNS / mDNS", 1000));
+            assert(read_until(master_fd, output, sizeof(output), &output_length,
+                     "ca fe", 1000));
+            assert(write(master_fd, "q", 1U) == 1);
 
     output[0] = '\0';
     output_length = 0U;

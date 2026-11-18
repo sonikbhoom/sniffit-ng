@@ -142,9 +142,10 @@ bool sn_decode_dhcp4(const uint8_t *bytes,
             return false;
         }
         return sn_decode_result_fits(snprintf(output, output_capacity,
-            "DHCPv4 %s xid=0x%08x htype=%u chaddr=%s lease=%u options=%zu",
+            "DHCPv4 %s xid=0x%08x htype=%u chaddr=%s lease=%u options=%zu yiaddr=%u.%u.%u.%u",
             message_type_name(dhcp_message_type), transaction_id, hardware_type,
-            hardware_address, lease_seconds, option_count), output_capacity);
+            hardware_address, lease_seconds, option_count,
+            bytes[16], bytes[17], bytes[18], bytes[19]), output_capacity);
     }
 
     return sn_decode_result_fits(snprintf(output, output_capacity,

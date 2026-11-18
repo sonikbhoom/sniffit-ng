@@ -27,7 +27,20 @@ bool sn_decode_icmp(const struct sn_packet_view *packet,
                         name, packet->icmp_code, packet->icmp_identifier,
                 packet->icmp_sequence, packet->payload_length), output_capacity);
     }
-        return sn_decode_result_fits(snprintf(output, output_capacity,
-                "ICMP %s type=%u code=%u", name, packet->icmp_type,
-                packet->icmp_code), output_capacity);
+    if (packet->transport != NULL && packet->transport_length >= 8U) {
+        const uint8_t *icmp = packet->transport;
+        if (packet->icmp_type == 3U && packet->icmp_code == 4U) {
+            return sn_decode_result_fits(snprintf(output, output_capacity,
+                "ICMP %s code=4 (fragmentation needed) next-hop-mtu=%u", name,
+                ((unsigned int)icmp[6] << 8) | icmp[7]), output_capacity);
+        }
+        if (packet->icmp_type == 5U) {
+            return sn_decode_result_fits(snprintf(output, output_capacity,
+                "ICMP %s code=%u gateway=%u.%u.%u.%u", name, packet->icmp_code,
+                icmp[4], icmp[5], icmp[6], icmp[7]), output_capacity);
+        }
+    }
+    return sn_decode_result_fits(snprintf(output, output_capacity,
+            "ICMP %s type=%u code=%u", name, packet->icmp_type,
+            packet->icmp_code), output_capacity);
 }

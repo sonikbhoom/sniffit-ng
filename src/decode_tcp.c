@@ -39,6 +39,10 @@ bool sn_decode_tcp(const struct sn_packet_view *packet,
         packet->payload_length != packet->transport_length - header_length) {
         return false;
     }
+    if ((source_port == 179U || destination_port == 179U) && !packet->more_fragments &&
+        sn_decode_bgp(packet->payload, packet->payload_length, output, output_capacity)) {
+        return true;
+    }
     if ((source_port == 23U || destination_port == 23U) &&
         sn_decode_telnet(packet->payload, packet->payload_length,
                          application, sizeof(application))) {

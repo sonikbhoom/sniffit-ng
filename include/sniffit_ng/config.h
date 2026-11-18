@@ -22,11 +22,15 @@ struct sn_ui_priority_port {
     "## User has acknowledged to behave ethically and inspect only authorized traffic."
 #define SN_CONFIG_FULL_DECODE_ACK_COMMENT \
     "## User acknowledges Telnet hex display can expose credentials and private traffic."
+#define SN_CONFIG_MDNS_FULL_DECODE_ACK_COMMENT \
+    "## User acknowledges mDNS hex display can expose private device and service names."
 
 struct sn_app_config {
     bool inspect_payloads;
     bool payload_display_acknowledged;
     bool full_decode;
+    bool mdns_full_decode;
+    bool mdns_full_decode_acknowledged;
     bool full_decode_acknowledged;
     bool resolve_external_addr;
     bool show_raw_flows;

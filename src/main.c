@@ -206,6 +206,7 @@ static int replay_pcap(const char *path,
                        bool pcap_recording_enabled,
                        bool payload_inspection_enabled,
                        bool full_decode_enabled,
+                       bool mdns_full_decode_enabled,
                        bool show_raw_flows,
                        bool tainted_extensions,
                        const enum sn_decoder_mode decoder_modes[
@@ -275,7 +276,7 @@ static int replay_pcap(const char *path,
     }
 
     sn_monitor_init(&monitor, SN_FLOW_DEFAULT_IDLE_TIMEOUT_NS);
-    if (!sn_monitor_set_full_decode(&monitor, full_decode_enabled)) {
+    if (!sn_monitor_set_hex_views(&monitor, full_decode_enabled, mdns_full_decode_enabled)) {
         fprintf(stderr, "sniffit-ng: could not allocate full-decode history\n");
         sn_monitor_destroy(&monitor);
         (void)sn_priority_log_close(priority_log);
@@ -347,6 +348,7 @@ static int run_live_capture(const char *device,
                             bool payload_logging_enabled,
                             bool payload_inspection_enabled,
                             bool full_decode_enabled,
+                            bool mdns_full_decode_enabled,
                             bool show_raw_flows,
                             bool tainted_extensions,
                             const enum sn_decoder_mode decoder_modes[
@@ -444,7 +446,7 @@ static int run_live_capture(const char *device,
     }
 
     sn_monitor_init(&monitor, SN_FLOW_DEFAULT_IDLE_TIMEOUT_NS);
-    if (!sn_monitor_set_full_decode(&monitor, full_decode_enabled)) {
+    if (!sn_monitor_set_hex_views(&monitor, full_decode_enabled, mdns_full_decode_enabled)) {
         fprintf(stderr, "sniffit-ng: could not allocate full-decode history\n");
         sn_monitor_destroy(&monitor);
         sn_capture_close(capture);
@@ -579,6 +581,9 @@ int main(int argc, char **argv)
         fprintf(stderr,
                 "sniffit-ng: full Telnet packet hex enabled; captured bytes can include cleartext credentials and private data\n");
     }
+    if (config.mdns_full_decode) {
+        fprintf(stderr, "sniffit-ng: UDP/5353 packet hex enabled; captured bytes can include private device and service names\n");
+    }
     if (config.tainted_extensions) {
         fprintf(stderr,
                 "sniffit-ng: tainted compile-time protocol extensions enabled; extension code is not sandboxed\n");
@@ -601,6 +606,7 @@ int main(int argc, char **argv)
         return replay_pcap(pcap_path, payload_logging_enabled,
                            pcap_output_path != NULL,
                            payload_inspection_enabled, config.full_decode,
+                           config.mdns_full_decode,
                            config.show_raw_flows,
                            config.tainted_extensions, config.decoder_modes,
                            config.ui_priority_ports, config.ui_priority_count,
@@ -613,6 +619,7 @@ int main(int argc, char **argv)
     return run_live_capture(interface_name, promiscuous,
                             payload_logging_enabled, payload_inspection_enabled,
                             config.full_decode,
+                            config.mdns_full_decode,
                             config.show_raw_flows, config.tainted_extensions,
                             config.decoder_modes,
                             config.ui_priority_ports, config.ui_priority_count,

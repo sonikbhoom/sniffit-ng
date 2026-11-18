@@ -50,6 +50,7 @@ add_library(sniffit_decode STATIC
     src/decode_ssh.c
     src/decode_http.c
     src/decode_udp.c
+    src/decode_ssdp.c
     src/decode_igmp.c
     src/decode_snmp.c
     src/decode_vrrp.c

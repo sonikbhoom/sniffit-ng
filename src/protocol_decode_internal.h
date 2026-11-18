@@ -1,11 +1,14 @@
 #ifndef SNIFFIT_NG_PROTOCOL_DECODE_INTERNAL_H
 #define SNIFFIT_NG_PROTOCOL_DECODE_INTERNAL_H
-
 #include "sniffit_ng/packet.h"
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+bool sn_decode_bgp(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
+bool sn_decode_ospf2(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
+bool sn_decode_gre(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
 
 static inline bool sn_decode_result_fits(int formatted_length, size_t output_capacity)
 {
@@ -34,6 +37,7 @@ bool sn_decode_http(const uint8_t *bytes,
 bool sn_decode_udp(const struct sn_packet_view *packet,
                    char *output,
                    size_t output_capacity);
+bool sn_decode_ssdp(const uint8_t *bytes, size_t length, char *output, size_t capacity);
 bool sn_decode_igmp(const struct sn_packet_view *packet,
                     char *output,
                     size_t output_capacity);
@@ -76,6 +80,10 @@ bool sn_decode_dns(const uint8_t *bytes,
                    size_t length,
                    char *output,
                    size_t output_capacity);
+bool sn_decode_mdns(const uint8_t *bytes,
+                    size_t length,
+                    char *output,
+                    size_t output_capacity);
 bool sn_decode_dns_tcp(const uint8_t *bytes,
                        size_t length,
                        char *output,

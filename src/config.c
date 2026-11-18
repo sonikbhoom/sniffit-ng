@@ -199,6 +199,11 @@ bool sn_config_validate_inspection_options(
                   0U);
         return false;
     }
+    if (config->mdns_full_decode && !config->mdns_full_decode_acknowledged) {
+        set_error(error_buffer, error_buffer_size,
+                  "mdns_full_decode requires the active sensitive-data acknowledgment comment", 0U);
+        return false;
+    }
     if (error_buffer != NULL && error_buffer_size > 0U) {
         error_buffer[0] = '\0';
     }
@@ -215,6 +220,7 @@ bool sn_config_load_file(const char *path,
     size_t line_number = 0U;
     bool inspect_setting_seen = false;
     bool full_decode_setting_seen = false;
+    bool mdns_full_decode_setting_seen = false;
     bool external_address_setting_seen = false;
     bool raw_flows_setting_seen = false;
     bool tainted_extensions_setting_seen = false;
@@ -259,6 +265,10 @@ bool sn_config_load_file(const char *path,
             config->full_decode_acknowledged = true;
             continue;
         }
+        if (strcmp(text, SN_CONFIG_MDNS_FULL_DECODE_ACK_COMMENT) == 0) {
+            config->mdns_full_decode_acknowledged = true;
+            continue;
+        }
         if (text[0] == '#') {
             continue;
         }
@@ -295,6 +305,18 @@ bool sn_config_load_file(const char *path,
                     fclose(stream);
                     set_error(error_buffer, error_buffer_size,
                               "full_decode must be true or false", line_number);
+                    return false;
+                }
+            } else if (strcmp(key, "mdns_full_decode") == 0 && !mdns_full_decode_setting_seen) {
+                mdns_full_decode_setting_seen = true;
+                if (strcmp(value, "true") == 0) {
+                    config->mdns_full_decode = true;
+                } else if (strcmp(value, "false") == 0) {
+                    config->mdns_full_decode = false;
+                } else {
+                    fclose(stream);
+                    set_error(error_buffer, error_buffer_size,
+                              "mdns_full_decode must be true or false", line_number);
                     return false;
                 }
             } else if (strcmp(key, "resolve_external_addr") == 0 &&

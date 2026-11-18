@@ -1,5 +1,7 @@
 #include "sniffit_ng/ui_window.h"
 
+#include <arpa/inet.h>
+#include <netdb.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -164,11 +166,45 @@ const char *sn_ui_port_service_name(uint8_t protocol, uint16_t port)
         case 123U: return "NTP";
         case 161U: return "SNMP";
         case 443U: return "QUIC";
+        case 1900U: return "SSDP";
         case 5353U: return "mDNS";
         default: return NULL;
         }
     }
     return NULL;
+}
+
+bool sn_ui_resolve_service_name(uint8_t protocol, uint16_t port, char *name, size_t capacity)
+{
+    const char *service;
+    size_t length;
+
+    if (name == NULL || capacity == 0U) {
+        return false;
+    }
+    name[0] = '\0';
+    if (port == 0U || (protocol != 6U && protocol != 17U)) {
+        return false;
+    }
+    service = sn_ui_port_service_name(protocol, port);
+    if (service == NULL) {
+        const struct servent *entry = getservbyport(htons(port), protocol == 6U ? "tcp" : "udp");
+        if (entry == NULL || entry->s_name == NULL) {
+            return false;
+        }
+        service = entry->s_name;
+    }
+    for (length = 0U; length < capacity && service[length] != '\0'; ++length) {
+        unsigned char byte = (unsigned char)service[length];
+        if (byte < 0x21U || byte > 0x7eU) {
+            return false;
+        }
+    }
+    if (length == 0U || length == capacity) {
+        return false;
+    }
+    memcpy(name, service, length + 1U);
+    return true;
 }
 
 static bool endpoint_matches(const struct sn_flow_endpoint *endpoint,
@@ -189,6 +225,13 @@ bool sn_ui_flow_matches(const struct sn_flow *flow,
     }
     if (filter->protocol_enabled) {
         if (flow->protocol != filter->protocol) {
+            return false;
+        }
+        if (filter->protocol_port_first != 0U &&
+            !((flow->endpoints[0].port >= filter->protocol_port_first &&
+               flow->endpoints[0].port <= filter->protocol_port_last) ||
+              (flow->endpoints[1].port >= filter->protocol_port_first &&
+               flow->endpoints[1].port <= filter->protocol_port_last))) {
             return false;
         }
     } else if (!filter->show_all_protocols) {

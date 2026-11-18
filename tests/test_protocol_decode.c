@@ -214,6 +214,12 @@ static void test_protocol_mode_selects_extension_or_simplified_decoder(void)
     assert(strstr(output, "SECURITY:") == NULL);
     assert(strcmp(sn_protocol_security_advisory(&packet),
                   "SECURITY: unencrypted and unauthenticated diagnostic traffic") == 0);
+    packet.icmp_type = icmp[0] = 3U;
+    packet.icmp_code = icmp[1] = 4U;
+    icmp[6] = 5U;
+    icmp[7] = 220U;
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "next-hop-mtu=1500") != NULL);
     assert(sn_protocol_decode_with_modes(&packet, output, sizeof(output),
                                          false, true, modes));
     assert(protocol_extension_calls == 1U);
@@ -390,6 +396,54 @@ static void test_tcp_and_udp_metadata(void)
     assert(strstr(output, "UDP 12345->53") != NULL);
     assert(strstr(output, "payload=3") != NULL);
     assert(strstr(output, "abc") == NULL);
+}
+
+static void test_ssdp_udp(void)
+{
+    static const struct {
+        const char *payload;
+        const char *summary;
+        bool response;
+    } cases[] = {
+        {"M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\n"
+         "MAN: \"ssdp:discover\"\r\nMX: 2\r\nsT:\tssdp:all  \r\n\r\n",
+         "SSDP M-SEARCH ST=ssdp:all", false},
+        {"NOTIFY * HTTP/1.1\r\nNT: upnp:rootdevice\r\nNTS: ssdp:alive\r\n\r\n",
+         "SSDP NOTIFY NT=upnp:rootdevice", false},
+        {"HTTP/1.1 200 OK\r\nST: urn:schemas-upnp-org:device:MediaRenderer:1\r\n"
+         "LOCATION: http://192.0.2.1/device.xml\r\n\r\n",
+         "SSDP 200 OK ST=urn:schemas-upnp-org:device:MediaRenderer:1", true},
+        {"M-SEARCH * HTTP/1.1\r\nST: ssdp:all\r\n", NULL, false},
+        {"M-SEARCH * HTTP/1.1\r\nST: ssdp:all\r\nST: upnp:rootdevice\r\n\r\n", NULL, false},
+        {"M-SEARCH * HTTP/1.1\r\nST: ssdp:\033[2J\r\n\r\n", NULL, false},
+        {"HTTP/1.1 2000 bogus\r\nST: ssdp:all\r\n\r\n", NULL, true},
+        {"ordinary UDP text", NULL, false}
+    };
+    uint8_t udp[8U] = {0};
+    char output[SN_PACKET_DECODE_TEXT_CAPACITY];
+    struct sn_packet_view packet = {.protocol = 17U, .transport = udp,
+                                    .transport_header_present = true};
+
+    for (size_t index = 0U; index < sizeof(cases) / sizeof(cases[0]); ++index) {
+        size_t service_offset = cases[index].response ? 0U : 2U;
+        size_t client_offset = 2U - service_offset;
+
+        udp[service_offset] = 0x07U;
+        udp[service_offset + 1U] = 0x6cU;
+        udp[client_offset] = 0xe4U;
+        udp[client_offset + 1U] = 0x7eU;
+        packet.payload = (const uint8_t *)cases[index].payload;
+        packet.payload_length = strlen(cases[index].payload);
+        packet.transport_length = sizeof(udp) + packet.payload_length;
+        udp[4] = (uint8_t)(packet.transport_length >> 8);
+        udp[5] = (uint8_t)packet.transport_length;
+        assert(sn_protocol_decode(&packet, output, sizeof(output)));
+        if (cases[index].summary != NULL) {
+            assert(strcmp(output, cases[index].summary) == 0);
+        } else {
+            assert(strncmp(output, "UDP ", 4U) == 0);
+        }
+    }
 }
 
 static void test_telnet_negotiation_is_decoded_without_payload_text(void)
@@ -708,6 +762,60 @@ static void test_dns_txt_content_stays_hidden(void)
     assert(sn_protocol_decode(&packet, output, sizeof(output)));
     assert(strstr(output, "TXT strings=1 bytes=7 content=hidden ttl=60") != NULL);
     assert(strstr(output, "secret") == NULL);
+}
+
+static void test_mdns_dns_sd_txt_summary(void)
+{
+    static const uint8_t question[] = {
+        5U, '_', 'h', 't', 't', 'p', 4U, '_', 't', 'c', 'p',
+        5U, 'l', 'o', 'c', 'a', 'l', 0U, 0U, 16U, 0x80U, 1U
+    };
+    uint8_t message[12U + sizeof(question) + 22U] = {0};
+    uint8_t udp[8U] = {0x14U, 0xe9U, 0x14U, 0xe9U};
+    struct sn_packet_view packet = {.protocol = 17U, .transport = udp,
+                                    .transport_header_present = true};
+    char output[SN_PACKET_DECODE_TEXT_CAPACITY];
+    size_t cursor = 12U + sizeof(question);
+
+    message[2] = 0x84U;
+    message[5] = 1U;
+    message[7] = 1U;
+    memcpy(message + 12U, question, sizeof(question));
+    message[cursor++] = 0xc0U;
+    message[cursor++] = 0x0cU;
+    message[cursor++] = 0U;
+    message[cursor++] = 16U;
+    message[cursor++] = 0x80U;
+    message[cursor++] = 1U;
+    message[cursor++] = 0U;
+    message[cursor++] = 0U;
+    message[cursor++] = 0U;
+    message[cursor++] = 120U;
+    message[cursor++] = 0U;
+    message[cursor++] = 10U;
+    message[cursor++] = 9U;
+    memcpy(message + cursor, "txtvers=1", 9U);
+    cursor += 9U;
+    assert(cursor == sizeof(message));
+
+    packet.payload = message;
+    packet.payload_length = sizeof(message);
+    packet.transport_length = sizeof(udp) + sizeof(message);
+    udp[4] = (uint8_t)(packet.transport_length >> 8);
+    udp[5] = (uint8_t)packet.transport_length;
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "mDNS RESPONSE") != NULL);
+    assert(strstr(output, "Question: _http._tcp.local TXT/IN") != NULL);
+    assert(strstr(output, "TXT strings=1 bytes=10 content=\"txtvers=1\" ttl=120") != NULL);
+    assert(strstr(sn_protocol_security_advisory(&packet),
+                  "mDNS is unauthenticated local discovery") != NULL);
+
+    --packet.payload_length;
+    --packet.transport_length;
+    udp[5] = (uint8_t)packet.transport_length;
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strncmp(output, "UDP 5353->5353", strlen("UDP 5353->5353")) == 0);
+    assert(strstr(output, "txtvers=1") == NULL);
 }
 
 static void test_dns_maximum_wire_name_is_bounded_in_output(void)
@@ -1100,6 +1208,8 @@ static void test_snmp_metadata_and_malformed_ber(void)
 static void test_igmp_vrrp_and_icmp(void)
 {
     uint8_t igmp[8] = {0x16U, 0U, 0U, 0U, 239U, 1U, 2U, 3U};
+    uint8_t igmp_v3[20] = {0x22U, [7] = 1U, [8] = 1U, [11] = 1U,
+                           [12] = 239U, [15] = 4U, [16] = 192U, [19] = 1U};
     uint8_t vrrp[12] = {0x21U, 7U, 100U, 1U, 0U, 1U, 0U, 0U,
                         192U, 0U, 2U, 1U};
     uint8_t icmp[8] = {8U, 0U, 0U, 0U, 0x12U, 0x34U, 0U, 7U};
@@ -1113,6 +1223,13 @@ static void test_igmp_vrrp_and_icmp(void)
     assert(sn_protocol_decode(&packet, output, sizeof(output)));
     assert(strstr(output, "IGMP v2 report") != NULL);
     assert(strstr(output, "239.1.2.3") != NULL);
+
+    packet.transport = igmp_v3;
+    packet.transport_length = sizeof(igmp_v3);
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "first-group=239.0.0.4 type=1 sources=1") != NULL);
+    --packet.transport_length;
+    assert(!sn_protocol_decode(&packet, output, sizeof(output)));
 
     packet.protocol = 112U;
     packet.transport = vrrp;
@@ -1259,9 +1376,9 @@ static void test_protocol_placeholders_are_inert(void)
         sn_decode_icmpv6, sn_decode_ndp,
         sn_decode_dhcp6, sn_decode_ospf3, sn_decode_ripng,
         sn_decode_lldp, sn_decode_cdp, sn_decode_stp, sn_decode_rstp,
-        sn_decode_lacp, sn_decode_bgp, sn_decode_ospf2, sn_decode_isis,
+        sn_decode_lacp, sn_decode_isis,
         sn_decode_rip, sn_decode_hsrp, sn_decode_glbp, sn_decode_mpls,
-        sn_decode_gre, sn_decode_ipip, sn_decode_vxlan, sn_decode_geneve
+        sn_decode_ipip, sn_decode_vxlan, sn_decode_geneve
     };
     uint8_t bytes[4] = {0U, 1U, 2U, 3U};
     char output[16];
@@ -1273,18 +1390,50 @@ static void test_protocol_placeholders_are_inert(void)
     }
 }
 
+static void test_ipv4_routing_summaries(void)
+{
+    const uint8_t gre[] = {0x20U, 0U, 8U, 0U, 0U, 0U, 0U, 1U};
+    const uint8_t ospf[44] = {2U, 1U, 0U, 44U, 192U, 0U, 2U, 1U};
+    uint8_t bgp[19];
+    char output[SN_PACKET_DECODE_TEXT_CAPACITY];
+    struct sn_packet_view packet = {.protocol = 47U, .transport = gre,
+                                    .transport_length = sizeof(gre)};
+
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "GRE protocol=0x0800") != NULL);
+    --packet.transport_length;
+    assert(!sn_protocol_decode(&packet, output, sizeof(output)));
+    packet.protocol = 89U;
+    packet.transport = ospf;
+    packet.transport_length = sizeof(ospf);
+    assert(sn_protocol_decode(&packet, output, sizeof(output)));
+    assert(strstr(output, "OSPFv2 Hello length=44 router=192.0.2.1") != NULL);
+    --packet.transport_length;
+    assert(!sn_protocol_decode(&packet, output, sizeof(output)));
+    memset(bgp, 0xff, 16U);
+    bgp[16] = 0U;
+    bgp[17] = 19U;
+    bgp[18] = 4U;
+    assert(sn_decode_bgp(bgp, sizeof(bgp), output, sizeof(output)));
+    assert(strcmp(output, "BGP KEEPALIVE length=19") == 0);
+    assert(!sn_decode_bgp(bgp, sizeof(bgp) - 1U, output, sizeof(output)));
+}
+
 int main(void)
 {
+    test_ipv4_routing_summaries();
     test_tainted_extension_gate_and_output_sanitizing();
     test_protocol_mode_selects_extension_or_simplified_decoder();
     test_ssh_raw_mode_shows_headers_without_payload();
     test_tcp_and_udp_metadata();
+    test_ssdp_udp();
     test_telnet_negotiation_is_decoded_without_payload_text();
     test_telnet_commands_and_truncated_sequences();
     test_http_summaries_hide_paths_and_sensitive_headers();
     test_http_extension_output_contract();
     test_dns_udp_tcp_and_compression_bounds();
     test_dns_txt_content_stays_hidden();
+    test_mdns_dns_sd_txt_summary();
     test_dns_maximum_wire_name_is_bounded_in_output();
     test_dhcp4_discover_offer_and_malformed_options();
     test_tls_record_metadata_on_tcp();

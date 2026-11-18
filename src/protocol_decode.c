@@ -146,6 +146,10 @@ static const char *security_note(const struct sn_packet_view *packet,
         source_port = read_be16(packet->transport);
         destination_port = read_be16(packet->transport + 2U);
     }
+    if (packet->protocol == 17U && source_port != 53U && destination_port != 53U &&
+        (source_port == 5353U || destination_port == 5353U)) {
+        return "mDNS is unauthenticated local discovery; device and service names are visible on-link";
+    }
     switch (module) {
     case SN_DECODER_ICMP:
         return "SECURITY: unencrypted and unauthenticated diagnostic traffic";
@@ -303,7 +307,7 @@ static bool decode_with_policy(
     module = decoder_module_for_packet(packet);
     raw_mode = modes != NULL && module < SN_DECODER_MODULE_COUNT &&
                modes[module] == SN_DECODER_RAW;
-    if (module == SN_DECODER_MODULE_COUNT &&
+    if (module == SN_DECODER_MODULE_COUNT && packet->protocol != 47U && packet->protocol != 89U &&
         (show_raw_flows || tainted_extensions)) {
         raw_mode = true;
     }
@@ -342,6 +346,14 @@ static bool decode_with_policy(
         break;
     case 17U:
         decoded = sn_decode_udp(packet, output, output_capacity);
+        break;
+    case 47U:
+    case 89U:
+        if (packet->fragment_offset == 0U && !packet->more_fragments) {
+            decoded = packet->protocol == 47U ?
+                sn_decode_gre(packet->transport, packet->transport_length, output, output_capacity) :
+                sn_decode_ospf2(packet->transport, packet->transport_length, output, output_capacity);
+        }
         break;
     case 112U:
         decoded = sn_decode_vrrp(packet, output, output_capacity);

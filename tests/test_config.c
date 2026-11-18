@@ -59,6 +59,7 @@ static void test_payload_inspection_defaults_off(void)
     assert(!config.inspect_payloads);
     assert(!config.payload_display_acknowledged);
     assert(!config.full_decode);
+    assert(!config.mdns_full_decode);
     assert(!config.full_decode_acknowledged);
     assert(!config.resolve_external_addr);
     assert(!config.show_raw_flows);
@@ -91,6 +92,16 @@ static void test_full_decode_requires_specific_ack(void)
     assert(sn_config_load_file(path, &config, error, sizeof(error)));
     assert(config.full_decode);
     assert(config.full_decode_acknowledged);
+    assert(unlink(path) == 0);
+
+    write_config_file(path, "mdns_full_decode = true\n");
+    assert(!sn_config_load_file(path, &config, error, sizeof(error)));
+    assert(strstr(error, "mdns_full_decode") != NULL);
+    assert(unlink(path) == 0);
+
+    write_config_file(path, "mdns_full_decode = true\n" SN_CONFIG_MDNS_FULL_DECODE_ACK_COMMENT "\n");
+    assert(sn_config_load_file(path, &config, error, sizeof(error)));
+    assert(config.mdns_full_decode && !config.full_decode);
     assert(unlink(path) == 0);
 }
 

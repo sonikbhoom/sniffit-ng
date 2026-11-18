@@ -230,6 +230,9 @@ enum sn_packet_result sn_packet_parse_link_ipv4(
         view->transport_header_present = true;
         return SN_PACKET_OK;
     }
+    case 47U:
+    case 89U:
+        return SN_PACKET_OK;
     default:
         return SN_PACKET_UNSUPPORTED;
     }

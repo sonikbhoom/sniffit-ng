@@ -139,7 +139,7 @@ static const char *record_type_name(uint16_t record_type)
 
 static const char *record_class_name(uint16_t record_class)
 {
-    switch (record_class) {
+    switch (record_class & 0x7fffU) {
     case 1U: return "IN";
     case 3U: return "CH";
     case 4U: return "HS";
@@ -197,6 +197,7 @@ static bool format_record_data(const uint8_t *message,
                                size_t data_offset,
                                size_t data_length,
                                uint32_t ttl,
+                               bool include_txt,
                                char *output,
                                size_t output_capacity)
 {
@@ -327,9 +328,52 @@ static bool format_record_data(const uint8_t *message,
             ++string_count;
         }
         if (output != NULL) {
-            written = snprintf(output, output_capacity,
-                               "TXT strings=%zu bytes=%zu content=hidden ttl=%u",
-                               string_count, data_length, (unsigned int)ttl);
+            written = include_txt ?
+                snprintf(output, output_capacity, "TXT strings=%zu bytes=%zu content=",
+                         string_count, data_length) :
+                snprintf(output, output_capacity,
+                         "TXT strings=%zu bytes=%zu content=hidden ttl=%u",
+                         string_count, data_length, (unsigned int)ttl);
+            if (include_txt && written >= 0 && (size_t)written < output_capacity) {
+                size_t used = (size_t)written;
+                size_t shown = 0U;
+                size_t remaining = 48U;
+                size_t strings_shown = 0U;
+
+                cursor = data_offset;
+                while (cursor < data_end && remaining > 0U && used + 1U < output_capacity) {
+                    size_t string_length = message[cursor++];
+                    size_t count = string_length < remaining ? string_length : remaining;
+
+                    if (strings_shown == 0U) {
+                        output[used++] = '"';
+                    } else {
+                        output[used++] = ';';
+                        output[used++] = '"';
+                    }
+                    for (size_t index = 0U; index < count && used + 1U < output_capacity; ++index) {
+                        uint8_t byte = message[cursor + index];
+                        output[used++] = byte >= 0x20U && byte <= 0x7eU &&
+                                         byte != '"' && byte != '\\' ? (char)byte : '.';
+                    }
+                    output[used++] = '"';
+                    output[used] = '\0';
+                    cursor += string_length;
+                    shown += count;
+                    remaining -= count;
+                    ++strings_shown;
+                }
+                if (shown + string_count < data_length && used + 3U < output_capacity) {
+                    memcpy(output + used, "...", 3U);
+                    used += 3U;
+                }
+                if (used + 2U < output_capacity) {
+                    (void)snprintf(output + used, output_capacity - used,
+                                   " ttl=%u", (unsigned int)ttl);
+                } else {
+                    output[output_capacity - 1U] = '\0';
+                }
+            }
         }
         break;
     }
@@ -348,6 +392,7 @@ static bool skip_record_section(const uint8_t *message,
                                 size_t message_length,
                                 size_t *cursor,
                                 uint16_t record_count,
+                                bool include_txt,
                                 bool capture_first,
                                 char *first_record,
                                 size_t first_record_capacity)
@@ -373,6 +418,7 @@ static bool skip_record_section(const uint8_t *message,
         if (data_length > message_length - data_offset ||
             !format_record_data(message, message_length, record_type,
                                 data_offset, data_length, ttl,
+                                include_txt,
                                 capture_first && index == 0U ? first_record : NULL,
                                 first_record_capacity)) {
             return false;
@@ -384,6 +430,8 @@ static bool skip_record_section(const uint8_t *message,
 
 static bool decode_dns_message(const uint8_t *bytes,
                                size_t length,
+                               const char *protocol_name,
+                               bool include_txt,
                                char *output,
                                size_t output_capacity)
 {
@@ -435,11 +483,11 @@ static bool decode_dns_message(const uint8_t *bytes,
 
     if ((size_t)answer_count + authority_count + additional_count >
             (length - cursor) / 11U ||
-        !skip_record_section(bytes, length, &cursor, answer_count, true,
+        !skip_record_section(bytes, length, &cursor, answer_count, include_txt, true,
                              first_answer, sizeof(first_answer)) ||
-        !skip_record_section(bytes, length, &cursor, authority_count, false,
+        !skip_record_section(bytes, length, &cursor, authority_count, include_txt, false,
                              first_answer, sizeof(first_answer)) ||
-        !skip_record_section(bytes, length, &cursor, additional_count, false,
+        !skip_record_section(bytes, length, &cursor, additional_count, include_txt, false,
                              first_answer, sizeof(first_answer))) {
         return false;
     }
@@ -447,10 +495,10 @@ static bool decode_dns_message(const uint8_t *bytes,
     if (question_count > 0U) {
         if (response) {
             return finish_dns_text(snprintf(output, output_capacity,
-                "DNS RESPONSE id=0x%04x status=%s opcode=%s AA=%u TC=%u RD=%u RA=%u\n"
+                "%s RESPONSE id=0x%04x status=%s opcode=%s AA=%u TC=%u RD=%u RA=%u\n"
                 "Question: %s %s/%s\nAnswer: %s\n"
                 "Counts: answers=%u authority=%u additional=%u",
-                read_be16(bytes), rcode_name(flags & 0x0fU), opcode_name(opcode),
+                protocol_name, read_be16(bytes), rcode_name(flags & 0x0fU), opcode_name(opcode),
                 (flags & 0x0400U) != 0U, (flags & 0x0200U) != 0U,
                 (flags & 0x0100U) != 0U, (flags & 0x0080U) != 0U,
                 first_question.text, record_type_name(first_type),
@@ -460,16 +508,16 @@ static bool decode_dns_message(const uint8_t *bytes,
                 output, output_capacity);
         }
             return finish_dns_text(snprintf(output, output_capacity,
-            "DNS REQUEST id=0x%04x opcode=%s RD=%u CD=%u\nQuestion: %s %s/%s",
-            read_be16(bytes), opcode_name(opcode),
+            "%s REQUEST id=0x%04x opcode=%s RD=%u CD=%u\nQuestion: %s %s/%s",
+            protocol_name, read_be16(bytes), opcode_name(opcode),
             (flags & 0x0100U) != 0U, (flags & 0x0010U) != 0U,
             first_question.text, record_type_name(first_type),
                 record_class_name(first_class)), output, output_capacity);
     }
             return finish_dns_text(snprintf(output, output_capacity,
-        "DNS %s id=0x%04x status=%s opcode=%s questions=0 answers=%u "
+        "%s %s id=0x%04x status=%s opcode=%s questions=0 answers=%u "
         "authority=%u additional=%u",
-        response ? "RESPONSE" : "REQUEST", read_be16(bytes),
+        protocol_name, response ? "RESPONSE" : "REQUEST", read_be16(bytes),
         rcode_name(flags & 0x0fU), opcode_name(opcode), answer_count,
             authority_count, additional_count), output, output_capacity);
 }
@@ -479,7 +527,13 @@ bool sn_decode_dns(const uint8_t *bytes,
                    char *output,
                    size_t output_capacity)
 {
-    return decode_dns_message(bytes, length, output, output_capacity);
+    return decode_dns_message(bytes, length, "DNS", false, output, output_capacity);
+}
+
+bool sn_decode_mdns(const uint8_t *bytes, size_t length,
+                    char *output, size_t output_capacity)
+{
+    return decode_dns_message(bytes, length, "mDNS", true, output, output_capacity);
 }
 
 bool sn_decode_dns_tcp(const uint8_t *bytes,
@@ -500,5 +554,5 @@ bool sn_decode_dns_tcp(const uint8_t *bytes,
     if (dns_length < DNS_HEADER_LENGTH || dns_length != length - 2U) {
         return false;
     }
-    return decode_dns_message(bytes + 2U, dns_length, output, output_capacity);
+    return decode_dns_message(bytes + 2U, dns_length, "DNS", false, output, output_capacity);
 }

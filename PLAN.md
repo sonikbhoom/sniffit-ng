@@ -2,7 +2,7 @@
 
 ## Goal
 
-Build a separate, defensive C successor to Sniffit that preserves its useful curses workflow while removing the legacy memory-safety, privilege, and reliability problems. Verified long-running stability is a core product goal alongside safe packet handling and a clear, usable curses interface; do not claim readiness without measured soak evidence. Keep successor work in the independent nested repository `/home/sonik/src/sniffit/sniffit-ng`; the legacy application remains under `/home/sonik/src/sniffit/sniffit-legacy`.
+Build a separate, defensive C successor to Sniffit that preserves its useful curses workflow while removing the legacy memory-safety, privilege, and reliability problems. Evolve it into a family of service-focused tools backed by shared capture, parsing, flow, policy, and UI components, so home users and network professionals can select the view that fits their task without duplicating core code. Verified long-running stability is a core product goal alongside safe packet handling and a clear, usable curses interface; do not claim readiness without measured soak evidence. Keep successor work in the independent nested repository `/home/sonik/src/sniffit/sniffit-ng`; the legacy application remains under `/home/sonik/src/sniffit/sniffit-legacy`.
 
 ## Evidence Driving the Work
 
@@ -17,6 +17,65 @@ The source review found packet parsing that does not receive or check libpcap's 
 - Treat long-running stability as a primary design pillar: bound retained state and resource use, keep monitoring lightweight, and verify the exact baseline build over sustained operation before making stability claims. Keep experimental builds separate from a running soak baseline.
 - Keep policy independent of low-level capture and terminal details. In C, use small structs and function interfaces where they provide real boundaries; avoid a pattern or abstraction quota.
 - Leave the legacy source intact and use offline fixtures/local test traffic for development.
+
+## Service-Oriented Toolset Objective
+
+Move from one general-purpose executable toward focused service entry points that share the existing `sniffit-ng` libraries and safety controls. A focused binary is a profile over shared components, not a copied parser or a separately improvised capture implementation. Users may still use the general monitor when they need cross-protocol context.
+
+```mermaid
+flowchart TD
+	Operator["Home user or network professional"] --> Tools
+
+	subgraph Tools["Focused entry points, shared implementation"]
+		General["sniffit-ng<br/>general flow monitor"]
+		DNS["sniffit-dns<br/>DNS over UDP/TCP"]
+		MDNS["sniffit-mdns<br/>DNS-SD discovery"]
+		LAN["sniffit-lan<br/>ARP, DHCP, SSDP, ICMP"]
+		Routing["sniffit-routing<br/>IGMP, OSPF, BGP, GRE"]
+	end
+
+	Tools --> Core
+
+	subgraph Core["Shared sniffit core"]
+		Capture["Authorized live capture or offline pcap"]
+		Parse["Bounded link, IP, TCP, UDP parsing"]
+		Select["Capture/display filters and service dispatch"]
+		Decode["Built-in protocol decoders"]
+		Policy["Field display, payload consent, retention policy"]
+		Output["TUI, concise text, structured output"]
+		Capture --> Parse --> Select --> Decode --> Policy --> Output
+	end
+
+	subgraph DecodeModes["Decoder scope"]
+		Clear["Visible unencrypted fields<br/>bounded structured summaries"]
+		Metadata["TLS/HTTPS and SSH<br/>visible handshake metadata only"]
+		NoDecrypt["Encrypted content remains opaque"]
+		Raw["Full payload/packet bytes<br/>separate explicit opt-in"]
+	end
+
+	Decode --> Clear
+	Decode --> Metadata
+	Decode --> Raw
+	Metadata --> NoDecrypt
+```
+
+### Migration Roadmap
+
+1. **Finish and characterize current summaries.** Keep the general monitor working while adding useful bounded summaries to supported protocol paths. Test valid, truncated, malformed, and unrecognized records from generated pcaps. Do not equate a port label with confirmed protocol identification.
+2. **Make disclosure policy explicit per data class.** Structured protocol fields should be available by default on authorized captures when they are bounded and useful. Keep full payload/packet hex, persistent payload logging, and collection of credentials or private content off by default and separately authorized. For mDNS/DNS-SD specifically, review the captured stable identifiers and TXT values; define a documented allowlist/redaction policy so useful service, model, and endpoint information can be retained without casually displaying every identifier.
+3. **Extract reusable service profiles.** Identify the stable entry-point needs (service filter, default view, config, help, output mode) and implement them as thin frontends over shared libraries. First candidate profiles are DNS/mDNS and a general LAN tools view. General and focused binaries must produce the same summaries for identical fixture packets and share the same bounds, permissions, and retention behavior.
+4. **Add protocol families by prerequisites.** Extend the current Ethernet/IPv4 path first. Add IPv6 parsing before DHCPv6/OSPFv3, and non-IP Ethernet dispatch before LACP/MPLS. Add bounded TCP reassembly only when a concrete packet-split protocol need justifies its memory, timeout, and test complexity.
+5. **Keep encrypted protocols useful without decryption.** Add only packet-visible SSH and TLS/HTTPS metadata such as banners, negotiation/version fields, and supported handshake metadata. Do not decrypt, recover secrets, or infer protected application content.
+6. **Package profiles as a coherent product.** Install a general tool plus focused entry points from one shared build, with per-profile defaults and optional common config. Verify packages and `--help` on clean target distributions; avoid maintaining duplicate binaries that drift in parser, privilege, or privacy behavior.
+
+### Service-Tool Acceptance Criteria
+
+- Every focused executable is a thin profile over shared capture/parser/flow libraries; no protocol parser is copied between binaries.
+- Selecting a profile limits displayed/decoded traffic but does not silently alter unrelated capture behavior. The user can choose authorized live capture or offline fixtures.
+- Built-in structured summaries are bounded, sanitized, and tested. TLS/SSH payloads remain encrypted and opaque; no active probing or packet generation is added.
+- Raw packet bytes and payload logging remain distinct opt-ins with visible warnings, explicit acknowledgments, bounded retention, and tests for clearing/disabling behavior.
+- The general app and each focused profile produce equivalent decoder output for the same synthetic pcaps. CI builds all profiles and exercises decoder, configuration, privilege, and PTY behavior.
+- Service-name lookups are labels from configured/system databases, not proof that the traffic is the named protocol.
 
 ## Delivery Stages
 
@@ -119,6 +178,7 @@ This is the canonical list of open project work. Add newly agreed TODOs here und
 | [ ] | Define and implement a small, explicitly mapped legacy CLI/config compatibility subset; preserve only validated, safe behavior. |
 | [ ] | Add selected summary/dump output modes. Keep payload output disabled unless its existing authorization and privacy gates are satisfied. |
 | [ ] | Add CPack generation/content checks to CI and verify install/remove on disposable Debian and RPM systems. RPM transaction testing and native Debian validation remain outstanding. |
+| [ ] | Fix libpcap compatibility in release packages. Kali QA reported that the 0.1.4 DEB needs `libpcap.so.1`, while Kali provides `libpcap.so.0.8`. Verify both executables' ELF `NEEDED` entries and the generated DEB dependencies. Build against the target distro's libpcap and let CPack derive matching dependencies; changing package metadata alone cannot fix an ELF SONAME mismatch. Check for the same issue on supported RPM distros and smoke-test both installed commands with `--help` on clean target systems. Do not substitute a SONAME symlink. |
 | [ ] | Decide on a project license before inviting reuse or distributing packages for general use. |
 | [ ] | Obtain qualified legal review of authorized-use and anti-circumvention policy, including the DMCA warning, before broad distribution. |
 
@@ -135,6 +195,8 @@ This is the canonical list of open project work. Add newly agreed TODOs here und
 | [x] | Default UI priority ports `22/tcp` and `23/tcp` are highlighted red and sorted first, regardless of traffic direction. |
 
 ### Protocol Decoding Features
+
+- The IPv4 pass extends the ICMPv4, IGMP, and DHCPv4 summaries and adds default built-in GRE outer-header, OSPFv2 header, and packet-local BGP header summaries. Option 5 selects these flows. Deeper OSPF/BGP fields, BGP TCP reassembly, and GRE inner-packet decoding remain open. DHCPv6 and OSPFv3 still need IPv6 flow support; LACP and MPLS still need non-IP Ethernet flow support before they can be offered as selectors.
 
 | Status | Task |
 | --- | --- |

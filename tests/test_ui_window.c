@@ -1,6 +1,8 @@
 #include "sniffit_ng/ui_window.h"
 
+#include <arpa/inet.h>
 #include <assert.h>
+#include <netdb.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -64,10 +66,33 @@ static void test_flow_order_is_deterministic(void)
 
 static void test_service_hints_are_protocol_specific(void)
 {
+    char service[40];
+    const struct servent *system_service;
     assert(strcmp(sn_ui_port_service_name(6U, 22U), "SSH") == 0);
     assert(strcmp(sn_ui_port_service_name(17U, 53U), "DNS") == 0);
+    assert(strcmp(sn_ui_port_service_name(17U, 1900U), "SSDP") == 0);
+    assert(strcmp(sn_ui_port_service_name(17U, 5353U), "mDNS") == 0);
+    assert(sn_ui_port_service_name(17U, 58494U) == NULL);
+    assert(sn_ui_port_service_name(6U, 1900U) == NULL);
     assert(sn_ui_port_service_name(17U, 22U) == NULL);
     assert(sn_ui_port_service_name(1U, 80U) == NULL);
+    assert(sn_ui_resolve_service_name(17U, 5353U, service, sizeof(service)));
+    assert(strcmp(service, "mDNS") == 0);
+    assert(!sn_ui_resolve_service_name(1U, 80U, service, sizeof(service)));
+    assert(!sn_ui_resolve_service_name(17U, 5353U, service, 2U));
+
+    system_service = getservbyport(htons(119U), "tcp");
+    if (system_service != NULL && system_service->s_name != NULL) {
+        char expected[sizeof(service)];
+        int length = snprintf(expected, sizeof(expected), "%s", system_service->s_name);
+
+        if (length > 0 && (size_t)length < sizeof(expected)) {
+            assert(sn_ui_resolve_service_name(6U, 119U, service, sizeof(service)));
+            assert(strcmp(service, expected) == 0);
+            assert(sn_ui_resolve_service_name(17U, 5353U, expected, sizeof(expected)));
+            assert(strcmp(expected, "mDNS") == 0 && strcmp(service, "mDNS") != 0);
+        }
+    }
 }
 
 static void test_hidden_protocols_yield_to_explicit_selection(void)
@@ -114,6 +139,12 @@ static void test_flow_filter_direction_semantics(void)
     filter.protocol_enabled = true;
     filter.protocol = 6U;
     assert(sn_ui_flow_matches(&flow, &filter));
+    filter.protocol_port_first = filter.protocol_port_last = 179U;
+    assert(!sn_ui_flow_matches(&flow, &filter));
+    flow.endpoints[0].port = 179U;
+    assert(sn_ui_flow_matches(&flow, &filter));
+    flow.endpoints[0].port = 1234U;
+    filter.protocol_port_first = filter.protocol_port_last = 0U;
     filter.protocol = 17U;
     assert(!sn_ui_flow_matches(&flow, &filter));
     filter.protocol_enabled = false;

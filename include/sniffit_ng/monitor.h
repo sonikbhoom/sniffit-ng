@@ -17,6 +17,7 @@
 
 struct sn_full_decode_record {
     bool active;
+    uint8_t protocol;
     struct sn_flow_endpoint endpoints[2];
     uint64_t sequence;
     struct timeval timestamp;
@@ -108,6 +109,7 @@ struct sn_monitor {
     size_t full_decode_count;
     uint64_t full_decode_sequence;
     bool full_decode_enabled;
+    bool mdns_full_decode_enabled;
     struct sn_ssh_header_record ssh_header_records[
         SN_MONITOR_SSH_HEADER_HISTORY_CAPACITY];
     size_t ssh_header_next;
@@ -119,6 +121,8 @@ struct sn_monitor {
 void sn_monitor_init(struct sn_monitor *monitor, uint64_t idle_timeout_ns);
 
 bool sn_monitor_set_full_decode(struct sn_monitor *monitor, bool enabled);
+bool sn_monitor_set_hex_views(struct sn_monitor *monitor, bool telnet, bool mdns);
+bool sn_monitor_flow_has_hex_view(const struct sn_monitor *monitor, const struct sn_flow *flow);
 
 void sn_monitor_clear_full_decode(struct sn_monitor *monitor);
 

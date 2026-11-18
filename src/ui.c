@@ -86,6 +86,10 @@ static const char *protocol_name(uint8_t protocol)
         return "ICMP";
     case 2U:
         return "IGMP";
+    case 47U:
+        return "GRE";
+    case 89U:
+        return "OSPFv2";
     case 112U:
         return "VRRP";
     default:
@@ -122,7 +126,13 @@ static void draw_filter_line(const struct sn_ui_flow_filter *filter)
     char protocol[48] = "All";
 
     if (filter->protocol_enabled) {
-        (void)snprintf(protocol, sizeof(protocol), "%s", protocol_name(filter->protocol));
+        const char *name = protocol_name(filter->protocol);
+        if (filter->protocol_port_first == 179U) {
+            name = "BGP";
+        } else if (filter->protocol_port_first == 67U) {
+            name = "DHCPv4";
+        }
+        (void)snprintf(protocol, sizeof(protocol), "%s", name);
     } else if (filter->hidden_protocol_count > 0U && !filter->show_all_protocols) {
         size_t used = (size_t)snprintf(protocol, sizeof(protocol), "All (hiding");
         for (size_t index = 0U; index < filter->hidden_protocol_count &&
@@ -214,7 +224,7 @@ static void draw_screen(struct sn_monitor *monitor,
     size_t title_length;
     size_t visible_rows;
 
-    if (monitor->full_decode_enabled) {
+    if (monitor->full_decode_enabled || monitor->mdns_full_decode_enabled) {
         (void)snprintf(title, sizeof(title),
                        "Sniffit NG | FULL DECODE");
     }
@@ -421,27 +431,41 @@ static void set_port_filter(const char *prompt, bool *enabled, uint16_t *port,
     *enabled = value != 0UL;
 }
 
-static bool parse_protocol_filter(const char *input, uint8_t *protocol)
-{
-    return sn_config_protocol_from_name(input, protocol);
-}
-
-static void set_protocol_filter(const char *prompt, bool *enabled,
-                                bool *show_all, uint8_t *protocol,
+static void set_protocol_filter(const char *prompt, struct sn_ui_flow_filter *filter,
                                 int input_timeout_ms)
 {
     char input[32] = {0};
+    uint8_t protocol = 0U;
+    uint16_t first = 0U;
+    uint16_t last = 0U;
 
     if (!read_line(prompt, input, sizeof(input), input_timeout_ms)) {
         return;
     }
     if (input[0] == '\0' || strcasecmp(input, "all") == 0) {
-        *enabled = false;
-        *show_all = true;
-    } else if (parse_protocol_filter(input, protocol)) {
-        *enabled = true;
-        *show_all = false;
+        filter->protocol_enabled = false;
+        filter->show_all_protocols = true;
+        return;
     }
+    if (strcasecmp(input, "bgp") == 0) {
+        protocol = 6U;
+        first = last = 179U;
+    } else if (strcasecmp(input, "dhcp4") == 0) {
+        protocol = 17U;
+        first = 67U;
+        last = 68U;
+    } else if (strcasecmp(input, "gre") == 0) {
+        protocol = 47U;
+    } else if (strcasecmp(input, "ospf2") == 0) {
+        protocol = 89U;
+    } else if (!sn_config_protocol_from_name(input, &protocol)) {
+        return;
+    }
+    filter->protocol = protocol;
+    filter->protocol_port_first = first;
+    filter->protocol_port_last = last;
+    filter->protocol_enabled = true;
+    filter->show_all_protocols = false;
 }
 
 static bool same_flow_identity(const struct sn_flow *left, const struct sn_flow *right)
@@ -642,7 +666,7 @@ static bool full_decode_record_matches_flow(
     const struct sn_flow *flow)
 {
     return record != NULL && record->active && flow != NULL &&
-           flow->protocol == 6U && record->endpoints[0].port == flow->endpoints[0].port &&
+           record->protocol == flow->protocol && record->endpoints[0].port == flow->endpoints[0].port &&
            record->endpoints[1].port == flow->endpoints[1].port &&
            memcmp(record->endpoints[0].ipv4, flow->endpoints[0].ipv4, 4U) == 0 &&
            memcmp(record->endpoints[1].ipv4, flow->endpoints[1].ipv4, 4U) == 0;
@@ -657,12 +681,6 @@ static bool ssh_header_record_matches_flow(
            record->endpoints[1].port == flow->endpoints[1].port &&
            memcmp(record->endpoints[0].ipv4, flow->endpoints[0].ipv4, 4U) == 0 &&
            memcmp(record->endpoints[1].ipv4, flow->endpoints[1].ipv4, 4U) == 0;
-}
-
-static bool flow_is_telnet(const struct sn_flow *flow)
-{
-    return flow != NULL && flow->protocol == 6U &&
-           (flow->endpoints[0].port == 23U || flow->endpoints[1].port == 23U);
 }
 
 static bool flow_is_ssh(const struct sn_flow *flow)
@@ -910,7 +928,7 @@ static bool append_latest_full_decode(struct sn_monitor *monitor,
 {
     const struct sn_full_decode_record *latest = NULL;
 
-    if (!monitor->full_decode_enabled || !flow_is_telnet(flow)) {
+    if (!sn_monitor_flow_has_hex_view(monitor, flow)) {
         return false;
     }
     for (size_t index = 0U; index < sn_monitor_full_decode_count(monitor); ++index) {
@@ -922,9 +940,10 @@ static bool append_latest_full_decode(struct sn_monitor *monitor,
     }
     if (latest == NULL) {
         if (*seen_sequence == 0U) {
-            (void)waddstr(history,
-                          "Full Decode: no recent valid TCP/23 packet is retained.\n"
-                          "Malformed or truncated packets are not attached to flows.\n");
+            (void)wprintw(history,
+                          "Full Decode: no recent valid %s packet is retained.\n"
+                          "Malformed or truncated packets are not attached to flows.\n",
+                          flow->protocol == 17U ? "UDP/5353" : "TCP/23");
         }
         return false;
     }
@@ -1070,7 +1089,7 @@ static void append_matching_events(struct sn_monitor *monitor,
                 changed = true;
             }
         }
-        if ((monitor->full_decode_enabled && flow_is_telnet(identity)) ||
+        if (sn_monitor_flow_has_hex_view(monitor, identity) ||
             (monitor->ssh_header_view_enabled && flow_is_ssh(identity))) {
             const struct sn_full_decode_record *latest_full = NULL;
             const struct sn_ssh_header_record *latest_ssh = NULL;
@@ -1084,7 +1103,7 @@ static void append_matching_events(struct sn_monitor *monitor,
                     break;
                 }
             }
-            if (flow_is_telnet(identity)) {
+            if (sn_monitor_flow_has_hex_view(monitor, identity)) {
                 for (size_t index = 0U;
                      index < sn_monitor_full_decode_count(monitor); ++index) {
                     const struct sn_full_decode_record *record =
@@ -1148,12 +1167,16 @@ static void draw_detail_contents(struct ui_detail_context *context,
 {
     char endpoint_a_port[6];
     char endpoint_b_port[6];
+    char service_a_name[40];
+    char service_b_name[40];
     const char *service_a = flow->dns_session && flow->endpoints[0].port == 0U ?
-        "DNS client" : sn_ui_port_service_name(flow->protocol,
-                                               flow->endpoints[0].port);
+        "DNS client" : sn_ui_resolve_service_name(flow->protocol, flow->endpoints[0].port,
+                                                  service_a_name, sizeof(service_a_name)) ?
+            service_a_name : "unknown";
     const char *service_b = flow->dns_session && flow->endpoints[1].port == 0U ?
-        "DNS client" : sn_ui_port_service_name(flow->protocol,
-                                               flow->endpoints[1].port);
+        "DNS client" : sn_ui_resolve_service_name(flow->protocol, flow->endpoints[1].port,
+                                                  service_b_name, sizeof(service_b_name)) ?
+            service_b_name : "unknown";
 
     if (load_history) {
         (void)werase(history);
@@ -1169,7 +1192,7 @@ static void draw_detail_contents(struct ui_detail_context *context,
                     flow->dns_session ? " DNS" : "",
                     flow->tcp_syn_only_no_payload ?
                         " | SYN ONLY / NO PAYLOAD" :
-                    context->monitor->full_decode_enabled && flow_is_telnet(flow) ?
+                    sn_monitor_flow_has_hex_view(context->monitor, flow) ?
                         " | FULL HEX" :
                     context->monitor->ssh_header_view_enabled && flow_is_ssh(flow) ?
                         " | SSH HEADER VIEW" : "");
@@ -1182,8 +1205,7 @@ static void draw_detail_contents(struct ui_detail_context *context,
                     flow->endpoints[1].ipv4[2], flow->endpoints[1].ipv4[3],
                     flow_port_text(flow, 1U, endpoint_b_port));
     (void)mvwprintw(panel, 4, 2, "Services A/B: %s / %s",
-                    service_a != NULL ? service_a : "unknown",
-                    service_b != NULL ? service_b : "unknown");
+                    service_a, service_b);
     (void)mvwprintw(panel, 5, 2, "Packets A>B/B>A: %llu/%llu",
                     (unsigned long long)flow->packets[0],
                     (unsigned long long)flow->packets[1]);
@@ -1567,9 +1589,8 @@ int sn_ui_run(struct sn_monitor *monitor,
             break;
         case '5':
         case KEY_F(5):
-            set_protocol_filter("Protocol (tcp, udp, icmp, igmp, vrrp or all): ",
-                                &filter.protocol_enabled, &filter.show_all_protocols,
-                                &filter.protocol,
+            set_protocol_filter("Protocol (tcp udp icmp igmp vrrp bgp dhcp4 gre ospf2 all): ",
+                                &filter,
                                 capture_polling ? 50 : -1);
             selected = 0U;
             scroll_start = 0U;

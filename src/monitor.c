@@ -76,10 +76,15 @@ void sn_monitor_init(struct sn_monitor *monitor, uint64_t idle_timeout_ns)
 
 bool sn_monitor_set_full_decode(struct sn_monitor *monitor, bool enabled)
 {
+    return sn_monitor_set_hex_views(monitor, enabled, false);
+}
+
+bool sn_monitor_set_hex_views(struct sn_monitor *monitor, bool telnet, bool mdns)
+{
     if (monitor == NULL) {
         return false;
     }
-    if (enabled) {
+    if (telnet || mdns) {
         if (monitor->full_decode_records == NULL) {
             monitor->full_decode_records = calloc(
                 SN_MONITOR_FULL_DECODE_HISTORY_CAPACITY,
@@ -88,14 +93,30 @@ bool sn_monitor_set_full_decode(struct sn_monitor *monitor, bool enabled)
                 return false;
             }
         }
-        monitor->full_decode_enabled = true;
+        if (monitor->full_decode_enabled != telnet || monitor->mdns_full_decode_enabled != mdns) {
+            sn_monitor_clear_full_decode(monitor);
+        }
+        monitor->full_decode_enabled = telnet;
+        monitor->mdns_full_decode_enabled = mdns;
         return true;
     }
     sn_monitor_clear_full_decode(monitor);
     free(monitor->full_decode_records);
     monitor->full_decode_records = NULL;
     monitor->full_decode_enabled = false;
+    monitor->mdns_full_decode_enabled = false;
     return true;
+}
+
+bool sn_monitor_flow_has_hex_view(const struct sn_monitor *monitor, const struct sn_flow *flow)
+{
+    if (monitor == NULL || flow == NULL) {
+        return false;
+    }
+    return (monitor->full_decode_enabled && flow->protocol == 6U &&
+            (flow->endpoints[0].port == 23U || flow->endpoints[1].port == 23U)) ||
+           (monitor->mdns_full_decode_enabled && flow->protocol == 17U && !flow->dns_session &&
+            (flow->endpoints[0].port == 5353U || flow->endpoints[1].port == 5353U));
 }
 
 void sn_monitor_clear_full_decode(struct sn_monitor *monitor)
@@ -135,6 +156,7 @@ void sn_monitor_destroy(struct sn_monitor *monitor)
     free(monitor->full_decode_records);
     monitor->full_decode_records = NULL;
     monitor->full_decode_enabled = false;
+    monitor->mdns_full_decode_enabled = false;
     monitor->ssh_header_view_enabled = false;
 }
 
@@ -188,26 +210,18 @@ static void store_full_decode_record(struct sn_monitor *monitor,
                                      const struct sn_flow *flow)
 {
     struct sn_full_decode_record *record;
-    uint16_t source_port;
-    uint16_t destination_port;
     size_t stored_length;
 
-    if (!monitor->full_decode_enabled || monitor->full_decode_records == NULL ||
-        view->protocol != 6U || !view->transport_header_present ||
-        view->transport_length < 4U || flow == NULL) {
-        return;
-    }
-    source_port = (uint16_t)(((uint16_t)view->transport[0] << 8) |
-                             view->transport[1]);
-    destination_port = (uint16_t)(((uint16_t)view->transport[2] << 8) |
-                                  view->transport[3]);
-    if (source_port != 23U && destination_port != 23U) {
+    if (monitor->full_decode_records == NULL || !sn_monitor_flow_has_hex_view(monitor, flow) ||
+        !view->transport_header_present || view->transport_length < 4U ||
+        (view->protocol == 17U && view->more_fragments)) {
         return;
     }
 
     record = &monitor->full_decode_records[monitor->full_decode_next];
     memset(record, 0, sizeof(*record));
     record->active = true;
+    record->protocol = flow->protocol;
     record->endpoints[0] = flow->endpoints[0];
     record->endpoints[1] = flow->endpoints[1];
     if (monitor->full_decode_sequence < UINT64_MAX) {
@@ -446,6 +460,9 @@ enum sn_monitor_result sn_monitor_process(
         break;
     case 112U:
         increment_saturated(&monitor->stats.vrrp_packets);
+        break;
+    case 47U:
+    case 89U:
         break;
     default:
         if (parse_result != SN_PACKET_UNSUPPORTED) {

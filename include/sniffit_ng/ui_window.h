@@ -18,6 +18,8 @@ struct sn_ui_flow_filter {
     uint16_t source_port;
     uint16_t destination_port;
     uint8_t protocol;
+    uint16_t protocol_port_first;
+    uint16_t protocol_port_last;
     /* Hidden from the default view; a protocol filter or show_all_protocols overrides this. */
     bool show_all_protocols;
     uint8_t hidden_protocols[SN_CONFIG_HIDE_PROTOCOL_CAPACITY];
@@ -38,6 +40,7 @@ void sn_ui_sort_flows_by_priority(const struct sn_flow **flows,
                         const struct sn_ui_priority_port *priority_ports,
                         size_t priority_count);
 const char *sn_ui_port_service_name(uint8_t protocol, uint16_t port);
+bool sn_ui_resolve_service_name(uint8_t protocol, uint16_t port, char *name, size_t capacity);
 bool sn_ui_flow_matches(const struct sn_flow *flow,
                         const struct sn_ui_flow_filter *filter);
 int sn_ui_detail_navigation_direction(int key, int up_key, int down_key);

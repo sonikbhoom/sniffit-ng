@@ -30,14 +30,11 @@ bool sn_decode_cdp(const uint8_t *bytes, size_t length, char *output, size_t out
 bool sn_decode_stp(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
 bool sn_decode_rstp(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
 bool sn_decode_lacp(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
-bool sn_decode_bgp(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
-bool sn_decode_ospf2(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
 bool sn_decode_isis(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
 bool sn_decode_rip(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
 bool sn_decode_hsrp(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
 bool sn_decode_glbp(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
 bool sn_decode_mpls(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
-bool sn_decode_gre(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
 bool sn_decode_ipip(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
 bool sn_decode_vxlan(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
 bool sn_decode_geneve(const uint8_t *bytes, size_t length, char *output, size_t output_capacity);
